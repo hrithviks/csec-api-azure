@@ -1,2 +1,6 @@
 setup*
-plan.md
+plan*
+venv
+.terraform*
+_*.*
+_*.tf
