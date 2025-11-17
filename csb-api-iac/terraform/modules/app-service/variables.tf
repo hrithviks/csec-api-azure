@@ -134,7 +134,6 @@ variable "app_environment_vars" {
         "POSTGRES_MAX_CONN",
         "REDIS_HOST",
         "REDIS_PORT",
-        "REDIS_USER",
         "REDIS_PASSWORD",
         "ALLOWED_ORIGIN"
       ] :

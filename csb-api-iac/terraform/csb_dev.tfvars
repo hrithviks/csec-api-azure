@@ -52,6 +52,11 @@ vnet_private_dns_zones = {
   "postgres" = "privatelink.postgres.database.azure.com"
 }
 
+vnet_nsg_map = {
+  "csec-app-service-nsg"     = "csec-app-service-subnet"
+  "csec-private-service-nsg" = "csec-private-service-subnet"
+}
+
 vnet_network_security_group_rules = {
 
   # Rule 1: Allow Postgres traffic from the App Service subnet
@@ -111,7 +116,7 @@ app_service_flask_startup_command            = "gunicorn --bind=0.0.0.0 --worker
 app_service_py_version                       = "3.12"
 
 # API environment variables
-csec_api_auth_token        = null # For demo only. Secrets should be outside variable file
+csec_api_auth_token        = null # For demo only. Secrets should be outside variable file.
 csec_api_cache_ttl_seconds = 300
 csec_api_postgres_port     = 5432
 csec_api_postgres_max_conn = 10
@@ -121,7 +126,7 @@ csec_api_allowed_origin    = "localhost"
 ###################
 # Database Values #
 ###################
-db_postgres_admin_user   = "csec_psql_admin_user"
+db_postgres_admin_user   = "csec_psql_admin_user" # For demo only. Secrets should be outside variable file.
 db_postgres_storage_size = 32768
 db_postgres_sku          = "B_Standard_B1ms"
 

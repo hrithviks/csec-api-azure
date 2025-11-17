@@ -77,19 +77,13 @@ module "databases" {
   postgres_storage_size = var.db_postgres_storage_size
 
   # Redis variables
-  redis_subnet_id = module.network.services_subnet_id # Changed to a more appropriate subnet
+  redis_subnet_id = module.network.subnet_ids["csec-private-service-subnet"] # Changed to a more appropriate subnet
 
 }
 
 ###################################################################
 # Create private endpoints for secured backend data communication #
 ###################################################################
-
-locals {
-  private_dns_zone_ids = {
-    postgres = module.network.postgres_private_dns_zone_id
-  }
-}
 
 module "security" {
   source = "./modules/security"
@@ -102,9 +96,11 @@ module "security" {
   tags                = local.csb_resource_tags
 
   # Pass in dependencies from other modules
-  private_endpoints_subnet_id = module.network.private_endpoints_subnet_id
-  private_dns_zone_ids        = local.private_dns_zone_ids
-  postgres_server_id          = module.databases.postgres_server_id
+  private_endpoints_subnet_id = module.network.subnet_ids["csec-private-service-subnet"]
+  private_dns_zone_ids = {
+    postgres = module.network.private_dns_zone_ids["postgres"]
+  }
+  postgres_server_id = module.databases.postgres_server_id
 
   depends_on = [
     module.network,
@@ -142,13 +138,13 @@ module "app_service" {
   flask_startup_command = var.app_service_flask_startup_command
 
   # Pass in dependencies from the network module
-  subnet_id = module.network.app_service_subnet_id
+  subnet_id = module.network.subnet_ids["csec-app-service-subnet"]
 
   # App environment variables
   app_environment_vars = {
     "API_AUTH_TOKEN" : var.csec_api_auth_token
     "CACHE_TTL_SECONDS" : var.csec_api_cache_ttl_seconds
-    "POSTGRES_HOST" : module.databases.postgres_fqdn
+    "POSTGRES_HOST" : module.databases.postgres_server_fqdn
     "POSTGRES_PORT" : var.csec_api_postgres_port
     "POSTGRES_USER" : module.databases.postgres_admin_username
     "POSTGRES_PASSWORD" : module.databases.postgres_admin_password
@@ -156,7 +152,7 @@ module "app_service" {
     "POSTGRES_MAX_CONN" : var.csec_api_postgres_max_conn
     "REDIS_HOST" : module.databases.redis_ip_address
     "REDIS_PORT" : var.csec_api_redis_port
-    "REDIS_USER" : var.csec_api_redis_user_name
+    "REDIS_USER" : "default"
     "REDIS_PASSWORD" : module.databases.redis_password
     "ALLOWED_ORIGIN" : var.csec_api_allowed_origin
   }

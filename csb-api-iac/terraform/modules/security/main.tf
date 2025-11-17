@@ -25,4 +25,6 @@ resource "azurerm_private_endpoint" "postgres" {
     private_connection_resource_id = var.postgres_server_id
     subresource_names              = ["postgresqlServer"] # This is the sub-resource for Postgres
   }
+
+  tags = var.tags
 }

@@ -61,15 +61,15 @@ resource "random_password" "redis_admin" {
 
 # Create the Redis container group
 resource "azurerm_container_group" "redis" {
-  name                = "${var.resource_prefix}-redis-cgp-${var.environment}"
+  name                = "${var.resource_prefix}-redis-server-${var.environment}"
   location            = var.location
   resource_group_name = var.resource_group_name
   os_type             = "Linux"
   ip_address_type     = "Private"
-  subnet_ids          = [var.redis_subnet_id] # This variable will need to be added
+  subnet_ids          = [var.redis_subnet_id] # Place redis container in the private subnet
 
   container {
-    name   = "${var.resource_prefix}-redis-cgr-${var.environment}"
+    name   = "${var.resource_prefix}-redis-container-${var.environment}"
     image  = var.redis_image
     cpu    = var.redis_cpu
     memory = var.redis_memory

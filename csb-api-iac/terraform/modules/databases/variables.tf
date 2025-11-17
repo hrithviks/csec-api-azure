@@ -111,7 +111,7 @@ variable "redis_os_type" {
 variable "redis_image" {
   type        = string
   description = "The image for the Redis cache."
-  default     = "redis:latest"
+  default     = "redis:7.2-alpine"
 }
 
 variable "redis_admin_password_chars" {

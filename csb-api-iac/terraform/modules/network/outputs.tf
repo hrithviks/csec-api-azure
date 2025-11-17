@@ -5,12 +5,17 @@ Description : Network module configuration for CSB-API-Service
 Context     : Module Outputs
 */
 
-output "private_subnet_id" {
-  description = "The ID of the private subnet."
-  value       = azurerm_subnet.main["${var.resource_prefix}-private-service-subnet"].id
+output "vnet_id" {
+  description = "The ID of the virtual network."
+  value       = azurerm_virtual_network.main.id
 }
 
-output "app_service_subnet_id" {
-  description = "The ID of the app service subnet."
-  value       = azurerm_subnet.main["${var.resource_prefix}-app-service-subnet"].id
+output "subnet_ids" {
+  description = "A map of subnet logical names to their resource IDs."
+  value       = { for k, v in azurerm_subnet.main : k => v.id }
+}
+
+output "private_dns_zone_ids" {
+  description = "A map of logical DNS zone names to their resource IDs."
+  value       = { for k, v in azurerm_private_dns_zone.main : k => v.id }
 }

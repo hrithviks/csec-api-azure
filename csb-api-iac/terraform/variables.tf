@@ -59,7 +59,16 @@ variable "vnet_address_cidr" {
 
 variable "vnet_subnets_map" {
   description = "The subnets to be created in the VNet."
-  type        = map(any)
+  type = map(object({
+    name             = string
+    address_prefixes = list(string)
+    delegations = optional(list(object({
+      name         = string
+      service_name = string
+      actions      = list(string)
+    })), [])
+    private_endpoint_policies = string
+  }))
 }
 
 variable "vnet_private_dns_zones" {
@@ -139,12 +148,6 @@ variable "csec_api_redis_port" {
   type        = number
   description = "The port number of the Redis database."
   default     = 6379
-}
-
-variable "csec_api_redis_user_name" {
-  type        = string
-  description = "The username for the Redis connection."
-  default     = "default"
 }
 
 variable "csec_api_allowed_origin" {
