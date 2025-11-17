@@ -1,0 +1,173 @@
+/*
+Project     : CSB-API-Service
+Module      : Terraform Root Configuration
+Description : Root configuration for CSB-API-Service
+Context     : Module Variables
+*/
+
+#################
+# Basic Section #
+#################
+
+variable "app_resource_group_name" {
+  type        = string
+  description = "Main resource group to host the application."
+}
+
+variable "app_location" {
+  description = "The Azure region where resources will be deployed."
+  type        = string
+
+  validation {
+    condition     = contains(["southeastasia"], var.app_location)
+    error_message = "Invalid location for the resources. Only 'southeastasia' is allowed."
+  }
+}
+
+variable "app_resource_name_prefix" {
+  description = "A prefix for all resource names."
+  type        = string
+  default     = "csec"
+}
+
+variable "app_environment" {
+  description = "The deployment environment."
+  type        = string
+
+  validation {
+    condition     = contains(["dev", "test", "prod"], var.app_environment)
+    error_message = "Invalid environment. Only 'dev', 'test' and 'prod' are allowed."
+  }
+}
+
+############################
+# Network Resource Section #
+############################
+
+variable "vnet_address_cidr" {
+  description = "The CIDR address space for the VNet."
+  type        = list(string)
+
+  /* Placeholder for CIDR validation
+  validation {
+    condition = alltrue([
+      for cidr in var.vnet_address_cidr : can(cidrnet(trimspace(cidr)))
+    ])
+    error_message = "Invalid CIDR representation."
+  }*/
+}
+
+variable "vnet_subnets_map" {
+  description = "The subnets to be created in the VNet."
+  type        = map(any)
+}
+
+variable "vnet_private_dns_zones" {
+  description = "The private DNS zones associated with the private subnet."
+  type        = map(string)
+}
+
+variable "vnet_nsg_map" {
+  description = "A map of Network Security Groups to create and associate with subnets."
+  type        = map(string)
+}
+
+variable "vnet_network_security_group_rules" {
+  description = "The network security groups rules."
+}
+
+#######################
+# App-Service Section #
+#######################
+
+variable "app_service_plan_sku" {
+  type        = string
+  description = "The SKU for the App Service Plan. Minimum B1 required for VNet integration."
+}
+
+variable "app_service_storage_account_tier" {
+  type        = string
+  description = "The storage account tier for the App Service."
+}
+
+variable "app_service_storage_account_replication_type" {
+  type        = string
+  description = "The storage account replication type for the App Service."
+}
+
+variable "app_service_os_type" {
+  type        = string
+  description = "The OS type for the App Service Plan."
+}
+
+variable "app_service_flask_startup_command" {
+  type        = string
+  description = "The startup command for the Flask app."
+}
+
+variable "app_service_py_version" {
+  type        = string
+  description = "The Python version required for the application."
+}
+
+# Environment variables for the CSB-API
+variable "csec_api_auth_token" {
+  type        = string
+  description = "Authentication token for the API service."
+  sensitive   = true
+}
+
+variable "csec_api_cache_ttl_seconds" {
+  type        = number
+  description = "Cache TTL in seconds for the API service."
+  default     = 300
+}
+
+variable "csec_api_postgres_port" {
+  type        = number
+  description = "The port number for the PostgreSQL DB Server."
+  default     = 5432
+}
+
+variable "csec_api_postgres_max_conn" {
+  type        = number
+  description = "The maximum allowed connections for the PostgreSQL DB Server."
+  default     = 10
+}
+
+variable "csec_api_redis_port" {
+  type        = number
+  description = "The port number of the Redis database."
+  default     = 6379
+}
+
+variable "csec_api_redis_user_name" {
+  type        = string
+  description = "The username for the Redis connection."
+  default     = "default"
+}
+
+variable "csec_api_allowed_origin" {
+  type        = string
+  description = "The allowed origin for the API service."
+  default     = "localhost"
+}
+
+####################
+# Database Section #
+####################
+
+variable "db_postgres_admin_user" {
+  type        = string
+  description = "The admin username for the PostgreSQL."
+}
+
+variable "db_postgres_sku" {
+  type        = string
+  description = "The SKU for the PostgreSQL DB service."
+}
+
+variable "db_postgres_storage_size" {
+  type        = number
+  description = "The storage size for the PostgreSQL DB service."
+}
