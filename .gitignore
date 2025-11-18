@@ -4,3 +4,5 @@ venv
 .terraform*
 _*.*
 _*.tf
+*.zip
+*.DS*
