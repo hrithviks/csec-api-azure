@@ -50,7 +50,8 @@ resource "azurerm_linux_web_app" "main" {
     application_stack {
       python_version = var.py_version
     }
-    always_on = true
+    always_on        = true
+    app_command_line = var.flask_startup_command
   }
 
   app_settings = var.app_environment_vars

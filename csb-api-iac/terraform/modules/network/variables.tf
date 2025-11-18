@@ -95,6 +95,7 @@ variable "nsg_rules" {
     source_address_prefix      = optional(string, null)       # Make optional, default to null
     destination_address_prefix = string
     source_subnet_key          = optional(string, null) # Make optional, default to null
+    destination_ip_var         = optional(string, null) # Make optional, default to null
   }))
   description = "A map of NSG rules. The key is the unique rule name."
 }

@@ -112,13 +112,14 @@ resource "azurerm_network_security_rule" "main" {
   source_port_range           = each.value.source_port_range
   destination_port_range      = each.value.destination_port_range
   destination_port_ranges     = each.value.destination_port_ranges
-  destination_address_prefix  = each.value.destination_address_prefix
 
   # Dynamic Source: Use a subnet's address if 'source_subnet_key' is set,
   # otherwise use the provided 'source_address_prefix' (e.g., "Internet")
   source_address_prefixes = each.value.source_subnet_key != null ? azurerm_subnet.main[each.value.source_subnet_key].address_prefixes : null
   source_address_prefix   = each.value.source_subnet_key == null ? each.value.source_address_prefix : null
 
+  # The destination is now the entire destination subnet, or a specific prefix like '*'
+  destination_address_prefix = each.value.destination_address_prefix
   # Set explicit dependency on the NSGs before attempting to create the rules
   depends_on = [
     azurerm_network_security_group.main

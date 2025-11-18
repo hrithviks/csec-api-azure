@@ -51,6 +51,9 @@ module "network" {
   private_dns_zones_logical_names = { for k, v in var.vnet_private_dns_zones : v => k }
   nsg_rules                       = var.vnet_network_security_group_rules
   nsg_map                         = var.vnet_nsg_map
+
+  # The depends_on is removed as the circular dependency is broken
+  # depends_on = [module.security]
 }
 
 output "debug_vnet_cidr" {
@@ -96,7 +99,7 @@ module "security" {
   tags                = local.csb_resource_tags
 
   # Pass in dependencies from other modules
-  private_endpoints_subnet_id = module.network.subnet_ids["csec-private-service-subnet"]
+  private_endpoints_subnet_id = module.network.subnet_ids["private_endpoints"]
   private_dns_zone_ids = {
     postgres = module.network.private_dns_zone_ids["postgres"]
   }
@@ -142,6 +145,7 @@ module "app_service" {
 
   # App environment variables
   app_environment_vars = {
+    "PYTHONPATH" : "/home/site/wwwroot"
     "API_AUTH_TOKEN" : var.csec_api_auth_token
     "CACHE_TTL_SECONDS" : var.csec_api_cache_ttl_seconds
     "POSTGRES_HOST" : module.databases.postgres_server_fqdn

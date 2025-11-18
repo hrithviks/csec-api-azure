@@ -43,8 +43,16 @@ vnet_subnets_map = {
         service_name = "Microsoft.ContainerInstance/containerGroups"
         actions      = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
       }
-    ] # This list is empty, so no dynamic blocks will be created
-    private_endpoint_policies = "Disabled"
+    ]
+    private_endpoint_policies = "Enabled" # Policies can be enabled here
+  },
+
+  # Subnet 3: For Private Endpoints
+  private_endpoints = {
+    name                      = "csec-pep-subnet-dev"
+    address_prefixes          = ["10.0.3.0/24"]
+    delegations               = []
+    private_endpoint_policies = "Disabled" # Must be disabled for Private Endpoints
   }
 }
 
@@ -55,24 +63,10 @@ vnet_private_dns_zones = {
 vnet_nsg_map = {
   "csec-app-service-nsg"     = "csec-app-service-subnet"
   "csec-private-service-nsg" = "csec-private-service-subnet"
+  "csec-pep-nsg"             = "private_endpoints"
 }
 
 vnet_network_security_group_rules = {
-
-  # Rule 1: Allow Postgres traffic from the App Service subnet
-  "Allow-Postgres-In" = {
-    nsg_key                    = "csec-private-service-nsg" # Fixed to private service
-    priority                   = 100
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "5432"
-    destination_port_ranges    = null # place-holder for multi-port rule
-    source_address_prefix      = null # dynamically set to subnet's address prefix by default
-    destination_address_prefix = "*"
-    source_subnet_key          = "csec-app-service-subnet"
-  },
 
   # Rule 2: Allow Redis traffic from the App Service subnet
   "Allow-Redis-In" = {
@@ -102,6 +96,36 @@ vnet_network_security_group_rules = {
     source_address_prefix      = "Internet" # Standard tag for internet traffic
     destination_address_prefix = "*"
     source_subnet_key          = null
+  },
+
+  # Rule 4: Deny all inbound traffic to the private endpoint subnet by default
+  "Deny-All-Inbound-PEP" = {
+    nsg_key                    = "csec-pep-nsg"
+    priority                   = 4096
+    direction                  = "Inbound"
+    access                     = "Deny"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    destination_port_ranges    = null
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+    source_subnet_key          = null
+  },
+
+  # Rule 5: Allow Postgres traffic from App Service Subnet to Private Endpoint Subnet
+  "Allow-Postgres-From-App-To-PEP" = {
+    nsg_key                    = "csec-pep-nsg" # Apply to the Private Endpoint NSG
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "5432"
+    destination_port_ranges    = null
+    source_address_prefix      = null
+    destination_address_prefix = "*" # Target the entire destination subnet
+    source_subnet_key          = "csec-app-service-subnet"
   }
 }
 
@@ -112,7 +136,7 @@ app_service_storage_account_tier             = "Standard"
 app_service_storage_account_replication_type = "LRS"
 app_service_os_type                          = "Linux"
 app_service_plan_sku                         = "B1"
-app_service_flask_startup_command            = "gunicorn --bind=0.0.0.0 --workers=4 main:app"
+app_service_flask_startup_command            = "gunicorn --bind=0.0.0.0 --workers=2 main:app"
 app_service_py_version                       = "3.12"
 
 # API environment variables
