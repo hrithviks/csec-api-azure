@@ -1,5 +1,5 @@
 /*
-Project     : CSB-API-Service
+Project     : CSB-API-Service Infrastructure Configuration
 Module      : Azure Databases
 Description : Databases module configuration for CSB-API-Service
 Context     : Module Main
@@ -64,6 +64,23 @@ resource "random_password" "redis_csb_api_user" {
   length  = var.redis_admin_password_chars
   special = true
 }
+
+/* Note: The Redis deployment using Azure Container Instances is intended for
+demonstration purposes and has limitations for enterprise-grade production use.
+Key Architectural Considerations for a production environment include:
+
+- Data Persistence: The current ACI deployment has ephemeral storage, meaning
+  data will be lost if the container restarts. For production, consider
+  mounting an Azure File Share to the container group for persistent storage.
+  Alternatively, using a managed service like Azure Cache for Redis would
+  provide built-in persistence and high availability.
+
+- Secure Authentication: While secure environment variables are used, a more
+  robust, enterprise-grade approach would involve storing secrets in Azure Key
+  Vault. The container application could then authenticate using a Managed
+  Identity to retrieve credentials from the vault at runtime, eliminating the
+  need to pass passwords as environment variables.
+*/
 
 # Create the Redis container group
 resource "azurerm_container_group" "redis" {

@@ -1,5 +1,5 @@
 /*
-Project     : CSB-API-Service
+Project     : CSB-API-Service Infrastructure Configuration
 Module      : Azure Databases
 Description : Outputs for the databases module
 Context     : Module Outputs

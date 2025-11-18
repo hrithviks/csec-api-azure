@@ -1,8 +1,51 @@
 /*
-Project     : CSB-API-Service
+Project     : CSB-API-Service Infrastructure Configuration
 Module      : Terraform Root Configuration
 Description : Root configuration for CSB-API-Service
 Context     : Module Main
+
+NOTE: This configuration is designed as a demonstration of a secure, modular
+Azure deployment. It prioritizes simplicity and clarity to showcase core
+infrastructure-as-code concepts. For a production-grade environment, several
+key architectural improvements would be necessary, as documented within the
+individual modules.
+
+# Key Architectural Decisions for this Demo:
+
+- Simplicity over HA: Services like Redis are self-managed in Azure Container
+  Instances (ACI) for simplicity, rather than using the more complex and
+  costly Azure Cache for Redis. The PostgreSQL server is a single instance
+  with limited redundancy.
+
+- Limited Scalability: The chosen service tiers (e.g., Basic for App Service
+  Plan) and architectures (single-instance databases) are cost-effective for a
+  demo but do not support auto-scaling or high-throughput scenarios.
+
+- Simplified Secret Management: Passwords are generated at runtime and passed
+  as environment variables. A production setup would use Azure Key Vault with
+  Managed Identities for secure secret storage and retrieval.
+
+- Basic Observability: This setup relies on native Azure tools for viewing
+  logs and metrics on a per-service basis. A production-grade system would
+  implement centralized log aggregation (e.g., via a Log Analytics Workspace)
+  for more effective correlation, analysis, and alerting across the entire
+  application stack.
+
+# Module Structure and Dependencies:
+
+The infrastructure is logically grouped into modules to promote reusability and
+separation of concerns. The dependency flow is as follows:
+
+1. `network`: Forms the foundation, creating the VNet and subnets.
+
+2. `databases`: Deploys PostgreSQL and Redis, 
+    depending on the `network` module for subnet placement.
+
+3. `security`: Creates Private Endpoints, depending on `network` 
+    (for subnet/DNS) and `databases` (for the target resource).
+
+4. `app_service`: Deploys the application, depending on all other modules 
+    for network integration and database connection details.
 */
 
 ################################

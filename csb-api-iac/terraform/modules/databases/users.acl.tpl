@@ -1,1 +1,0 @@
-user ${username} on >${password} ~* allcommands

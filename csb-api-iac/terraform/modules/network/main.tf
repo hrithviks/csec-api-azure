@@ -1,5 +1,5 @@
 /*
-Project     : CSB-API-Service
+Project     : CSB-API-Service Infrastructure Configuration
 Module      : Azure Network
 Description : Network module configuration for CSB-API-Service
 Context     : Module Main
@@ -87,6 +87,21 @@ resource "azurerm_private_dns_zone_virtual_network_link" "main" {
 ####################################
 # Network security group resources #
 ####################################
+
+/* Note: This network configuration provides a solid foundation. For a
+full-scale, enterprise-grade production environment, consider the following
+architectural enhancements:
+
+- Centralized Egress Control: For enhanced security and monitoring, all
+  outbound traffic from private subnets should be routed through a central
+  point. This can be achieved by associating a Route Table with the subnets
+  that directs traffic to an Azure Firewall or a NAT Gateway. This allows for
+  consistent IP-based allow-listing and centralized logging of outbound flows.
+
+- Ingress Traffic Management: For web-facing applications, an Azure Application
+  Gateway with a Web Application Firewall (WAF) should be used as the entry
+  point to filter for common web vulnerabilities (e.g., SQL injection, XSS).
+*/
 
 # NSG for the Private service subnet
 resource "azurerm_network_security_group" "main" {

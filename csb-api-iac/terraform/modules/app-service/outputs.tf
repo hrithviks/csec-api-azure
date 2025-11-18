@@ -1,5 +1,5 @@
 /*
-Project     : CSB-API-Service
+Project     : CSB-API-Service Infrastructure Configuration
 Module      : Azure App-Service
 Description : App-Service module configuration for CSB-API-Service
 Context     : Module Outputs

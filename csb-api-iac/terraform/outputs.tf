@@ -1,5 +1,5 @@
 /*
-Project     : CSB-API-Service
+Project     : CSB-API-Service Infrastructure Configuration
 Module      : Terraform Root Configuration
 Description : Root configuration for CSB-API-Service
 Context     : Module Outputs
