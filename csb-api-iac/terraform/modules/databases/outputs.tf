@@ -1,7 +1,7 @@
 /*
 Project     : CSB-API-Service
 Module      : Azure Databases
-Description : Databases module configuration for CSB-API-Service
+Description : Outputs for the databases module
 Context     : Module Outputs
 */
 
@@ -35,9 +35,9 @@ output "postgres_admin_username" {
   value       = var.postgres_admin_user
 }
 
-###################
-# Redis Outputs   #
-###################
+##########################
+# Redis Outputs          #
+##########################
 
 output "redis_ip_address" {
   description = "The IP address of the redis cache."
@@ -49,8 +49,19 @@ output "redis_fqdn" {
   value       = azurerm_container_group.redis.fqdn
 }
 
-output "redis_password" {
-  description = "The password for redis cache."
+output "redis_csb_api_user" {
+  description = "The username for the Redis csb-api user."
+  value       = var.redis_csb_api_user
+}
+
+output "redis_csb_api_user_password" {
+  description = "The password for the Redis csb-api user."
+  value       = random_password.redis_csb_api_user.result
+  sensitive   = true
+}
+
+output "redis_admin_password" {
+  description = "The password for the Redis admin user."
   value       = random_password.redis_admin.result
   sensitive   = true
 }

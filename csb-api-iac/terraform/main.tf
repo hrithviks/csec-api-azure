@@ -64,6 +64,10 @@ output "debug_vnet_cidr" {
 # Create managed PostgreSQL and Redis databases #
 #################################################
 
+locals {
+  db_redis_api_user = "${var.app_resource_name_prefix}-redis-user-${var.app_environment}"
+}
+
 module "databases" {
   source = "./modules/databases"
 
@@ -80,8 +84,11 @@ module "databases" {
   postgres_storage_size = var.db_postgres_storage_size
 
   # Redis variables
-  redis_subnet_id = module.network.subnet_ids["csec-private-service-subnet"] # Changed to a more appropriate subnet
-
+  redis_subnet_id               = module.network.subnet_ids["csec-private-service-subnet"]
+  redis_image                   = "ghcr.io/${var.db_redis_image_registry_user}/${var.db_redis_image}"
+  redis_image_registry_password = var.db_redis_image_registry_password
+  redis_image_registry_user     = var.db_redis_image_registry_user
+  redis_csb_api_user            = local.db_redis_api_user
 }
 
 ###################################################################
@@ -145,7 +152,6 @@ module "app_service" {
 
   # App environment variables
   app_environment_vars = {
-    "PYTHONPATH" : "/home/site/wwwroot"
     "API_AUTH_TOKEN" : var.csec_api_auth_token
     "CACHE_TTL_SECONDS" : var.csec_api_cache_ttl_seconds
     "POSTGRES_HOST" : module.databases.postgres_server_fqdn
@@ -156,8 +162,8 @@ module "app_service" {
     "POSTGRES_MAX_CONN" : var.csec_api_postgres_max_conn
     "REDIS_HOST" : module.databases.redis_ip_address
     "REDIS_PORT" : var.csec_api_redis_port
-    "REDIS_USER" : "default"
-    "REDIS_PASSWORD" : module.databases.redis_password
+    "REDIS_USER" : local.db_redis_api_user
+    "REDIS_PASSWORD" : module.databases.redis_csb_api_user_password
     "ALLOWED_ORIGIN" : var.csec_api_allowed_origin
   }
 

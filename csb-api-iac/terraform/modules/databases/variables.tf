@@ -111,7 +111,16 @@ variable "redis_os_type" {
 variable "redis_image" {
   type        = string
   description = "The image for the Redis cache."
-  default     = "redis:7.2-alpine"
+}
+
+variable "redis_image_registry_user" {
+  type        = string
+  description = "The username for the Redis image registry."
+}
+
+variable "redis_image_registry_password" {
+  type        = string
+  description = "The password for the Redis image registry."
 }
 
 variable "redis_admin_password_chars" {
@@ -130,4 +139,9 @@ variable "redis_memory" {
   type        = string
   description = "The memory for the Redis cache."
   default     = "0.5"
+}
+
+variable "redis_csb_api_user" {
+  type        = string
+  description = "The username for the Redis csb-api user."
 }

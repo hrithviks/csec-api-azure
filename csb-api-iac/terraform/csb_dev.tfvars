@@ -150,11 +150,13 @@ csec_api_allowed_origin    = "localhost"
 ###################
 # Database Values #
 ###################
-db_postgres_admin_user   = "csec_psql_admin_user" # For demo only. Secrets should be outside variable file.
+db_postgres_admin_user   = "csec_psql_admin_user"
 db_postgres_storage_size = 32768
 db_postgres_sku          = "B_Standard_B1ms"
 
-# For Redis, sticking to default values.
+# Redis Image
+db_redis_image               = "csb-redis-az:latest"
+db_redis_image_registry_user = "hrithviks"
 
 ###################
 # Security Values #

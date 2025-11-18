@@ -174,3 +174,18 @@ variable "db_postgres_storage_size" {
   type        = number
   description = "The storage size for the PostgreSQL DB service."
 }
+
+variable "db_redis_image_registry_user" {
+  type        = string
+  description = "The username for the Redis image registry."
+}
+
+variable "db_redis_image_registry_password" {
+  type        = string
+  description = "The password for the Redis image registry."
+}
+
+variable "db_redis_image" {
+  type        = string
+  description = "The image for the Redis cache."
+}

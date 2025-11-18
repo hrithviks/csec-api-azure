@@ -59,6 +59,12 @@ resource "random_password" "redis_admin" {
   special = true
 }
 
+# Create a random password for the csb-api redis user
+resource "random_password" "redis_csb_api_user" {
+  length  = var.redis_admin_password_chars
+  special = true
+}
+
 # Create the Redis container group
 resource "azurerm_container_group" "redis" {
   name                = "${var.resource_prefix}-redis-server-${var.environment}"
@@ -67,6 +73,13 @@ resource "azurerm_container_group" "redis" {
   os_type             = "Linux"
   ip_address_type     = "Private"
   subnet_ids          = [var.redis_subnet_id] # Place redis container in the private subnet
+
+  # Add credentials for pulling images from a private registry like ghcr.io
+  image_registry_credential {
+    server   = "ghcr.io"
+    username = var.redis_image_registry_user
+    password = var.redis_image_registry_password
+  }
 
   container {
     name   = "${var.resource_prefix}-redis-container-${var.environment}"
@@ -80,7 +93,10 @@ resource "azurerm_container_group" "redis" {
     }
 
     secure_environment_variables = {
-      "REDIS_ARGS" = "--requirepass ${random_password.redis_admin.result}"
+      # Environment variables for entrypoint script
+      "REDIS_ADMIN_PASSWORD"   = random_password.redis_admin.result,
+      "REDIS_CSB_API_USER"     = var.redis_csb_api_user,
+      "REDIS_CSB_API_PASSWORD" = random_password.redis_csb_api_user.result
     }
   }
 
