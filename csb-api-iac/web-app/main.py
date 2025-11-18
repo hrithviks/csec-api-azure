@@ -56,8 +56,7 @@ def get_postgres_status():
         return "OK", "Service Connection Verified."
     except Exception as e:
         # If connection fails, return error status
-        ## return "Error", str(e)
-        return "OK", "Service Connection Verified."
+        return "Error", str(e)
 
 
 def get_redis_status():
@@ -93,8 +92,7 @@ def get_redis_status():
         return "OK", "Service Connection Verified."
     except Exception as e:
         # If connection fails, return error status
-        ## return "Error", str(e)
-        return "OK", "Service Connection Verified."
+        return "Error", str(e)
 
 
 def perform_full_health_check():
