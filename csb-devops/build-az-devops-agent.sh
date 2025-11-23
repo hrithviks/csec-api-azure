@@ -47,6 +47,7 @@ AGENT_VERSION="4.265.1"
 
 # Azure Infrastructure Configuration
 RESOURCE_GROUP="csb-az-devops-rg"
+VNET_RESOURCE_GROUP="csb-main" # The resource group where the VNet is located.
 LOCATION="southeastasia"
 VNET_NAME="vnet-southeastasia"
 SUBNET_NAME="snet-southeastasia-1"
@@ -142,6 +143,14 @@ if [ ! -f "${SSH_KEY_PATH}" ]; then
   console_log "SSH key generated."
 fi
 
+# Get the full ID of the subnet from the specified VNet resource group.
+console_log "Fetching details for subnet '${SUBNET_NAME}' in VNet '${VNET_NAME}'..."
+SUBNET_ID=$(az network vnet subnet show \
+  --resource-group "${VNET_RESOURCE_GROUP}" \
+  --vnet-name "${VNET_NAME}" \
+  --name "${SUBNET_NAME}" \
+  --query id -o tsv)
+
 # Provision the Azure VM
 console_log "Provisioning Azure infrastructure for agent: ${VM_NAME}..."
 VM_OUTPUT=$(az vm create \
@@ -151,8 +160,7 @@ VM_OUTPUT=$(az vm create \
   --size "${VM_SIZE}" \
   --admin-username "${ADMIN_USER}" \
   --ssh-key-values "${SSH_KEY_PATH}.pub" \
-  --vnet-name "${VNET_NAME}" \
-  --subnet "${SUBNET_NAME}" \
+  --subnet "${SUBNET_ID}" \
   --custom-data cloud-init.yaml \
   --public-ip-sku Standard \
   --query "{publicIp:publicIpAddress, fqdn:fqdns}" \
