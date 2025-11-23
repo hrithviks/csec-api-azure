@@ -1,0 +1,107 @@
+# /az-infra-terraform.yml
+#
+# Description:
+# This is the main Azure DevOps CI/CD pipeline for deploying the CSB-API-Service
+# infrastructure using Terraform. It orchestrates deployments across multiple
+# environments (Dev, Test, Prod) by leveraging a reusable template.
+#
+# Triggers:
+# The pipeline is automatically triggered by commits to the 'main' branch that
+# include changes within the 'csb-api-iac/terraform/' directory.
+
+# For now, set to manual trigger. Should be configured to use branch and directory level triggers.
+trigger: none
+
+# Define container resources used by the pipeline.
+# The jobs will run inside this container, which has Terraform pre-installed.
+resources:
+  containers:
+    - container: terraform_ci
+      image: $(imageName)
+      endpoint: "csb-github-registry"
+
+# Use the self-hosted agent pool
+pool:
+  name: "csb-az-devops-agent-pool"
+
+# Pipeline-level variables
+variables:
+  # Link the variable group. Secrets are available as environment variables.
+  - group: csb-terraform-secrets
+  # Define individual variables as list items
+  - name: terraformWorkingDirectory
+    value: "$(System.DefaultWorkingDirectory)/csb-api-iac/terraform"
+  - name: imageName
+    value: "ghcr.io/hrithviks/csb-terraform-agent:latest"
+  - name: azureServiceConnection
+    value: "csb-az-devops-main"
+
+stages:
+  # Development Deployment Stage
+  - stage: Deploy_Dev
+    displayName: "Deploy to Dev"
+    jobs:
+      - deployment: Terraform_Dev
+        displayName: "Terraform Plan & Apply (Dev)"
+        container: terraform_ci
+        environment: "csb-dev"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - template: templates/terraform.yml
+                  parameters:
+                    environmentName: "Dev"
+                    environmentDisplayName: "Development"
+                    tfVarFile: "csb_dev.tfvars"
+                    tfStateFileKey: "dev.terraform.tfstate"
+                    azureServiceConnection: $(azureServiceConnection)
+                    terraformWorkingDirectory: $(terraformWorkingDirectory)
+  # Test Deployment Stage
+  - stage: Deploy_Test
+    displayName: "Deploy to Test"
+    dependsOn: Deploy_Dev # Set dependency on DEV stage
+    condition: false # Explicitly disable this stage
+    jobs:
+      - deployment: Terraform_Test
+        displayName: "Terraform Plan & Apply (Test)"
+        container: terraform_ci
+        environment: "csb-test"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - template: templates/terraform.yml
+                  parameters:
+                    environmentName: "Test"
+                    environmentDisplayName: "Test"
+                    tfVarFile: "csb_test.tfvars"
+                    tfStateFileKey: "test.terraform.tfstate"
+                    azureServiceConnection: $(azureServiceConnection)
+                    terraformWorkingDirectory: $(terraformWorkingDirectory)
+  # Prod Deployment Stage
+  - stage: Deploy_Prod
+    displayName: "Deploy to Prod"
+    dependsOn: Deploy_Test # Set dependency on TEST stage
+    condition: false # Explicitly disable this stage
+    jobs:
+      # This targets an Azure DevOps Environment, allowing for approval gates.
+      - deployment: Terraform_Prod
+        displayName: "Terraform Plan & Apply (Prod)"
+        container: terraform_ci
+        environment: "csb-prod"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - template: templates/terraform.yml
+                  parameters:
+                    environmentName: "Prod"
+                    environmentDisplayName: "Production"
+                    tfVarFile: "csb_prod.tfvars"
+                    tfStateFileKey: "prod.terraform.tfstate"
+                    azureServiceConnection: $(azureServiceConnection)
+                    terraformWorkingDirectory: $(terraformWorkingDirectory)

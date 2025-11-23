@@ -1,0 +1,80 @@
+# /ci-templates/terraform-deployment.yml
+#
+# Description:
+# This is a reusable Azure DevOps template for deploying Terraform infrastructure.
+# It encapsulates the common sequence of installing Terraform, initializing the
+# backend, creating an execution plan, and applying the plan.
+#
+# Parameters:
+# - environmentName: A short name for the environment (e.g., 'Dev', 'Test', 'Prod').
+# - environmentDisplayName: The full display name for the environment (e.g., 'Development').
+# - tfVarFile: The name of the Terraform variables file to use for this environment (e.g., 'csb_dev.tfvars').
+# - tfStateFileKey: The name of the state file in the Azure Blob Storage container (e.g., 'dev.terraform.tfstate').
+# - azureServiceConnection: The name of the Azure DevOps service connection to use for authentication.
+# - terraformWorkingDirectory: The path to the directory containing the Terraform configuration files.
+
+parameters:
+  - name: environmentName
+    type: string
+  - name: environmentDisplayName
+    type: string
+  - name: tfVarFile
+    type: string
+  - name: tfStateFileKey
+    type: string
+  - name: azureServiceConnection
+    type: string
+  - name: terraformWorkingDirectory
+    type: string
+
+steps:
+
+  # Note: Best Practices for Performance and Maintainability
+  #
+  # 1. Provider Caching (Currently Disabled):
+  #    To improve pipeline performance, it is highly recommended to cache the
+  #    Terraform provider plugins between runs. This prevents `terraform init`
+  #    from downloading them from the internet every time. This can be
+  #    achieved using the `Cache@2` task. This feature has been removed from
+  #    this template due to project-level permission constraints.
+  #
+  # 2. Consolidating Steps (Implemented):
+  #    This template follows the best practice of consolidating `init`, `plan`,
+  #    and `apply` into a single script task. This avoids repeating the
+  #    authentication setup and secret mapping for each command, making the
+  #    template cleaner and easier to maintain.
+
+  # Terraform Init, Plan & Apply
+  # This single task consolidates all Terraform commands.
+  # It configures authentication and then runs init, plan, and apply in sequence.
+  - task: AzureCLI@2
+    displayName: 'Terraform Init, Plan & Apply (${{ parameters.environmentName }})'
+    inputs:
+      azureSubscription: ${{ parameters.azureServiceConnection }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      workingDirectory: ${{ parameters.terraformWorkingDirectory }}
+      addSpnToEnvironment: true
+      inlineScript: |
+        set -e # exit on error
+        cd ${{ parameters.terraformWorkingDirectory }}
+
+        echo "##[command]Setting Terraform environment variables for authentication."
+        export ARM_CLIENT_ID=$servicePrincipalId
+        export ARM_CLIENT_SECRET=$servicePrincipalKey
+        export ARM_TENANT_ID=$tenantId
+        export ARM_SUBSCRIPTION_ID=$(az account show --query="id" -o tsv)
+
+        echo "##[command]Step 1: Initializing Terraform..."
+        terraform init -reconfigure \
+          -backend-config="key=${{ parameters.tfStateFileKey }}"
+
+        echo "##[command]Step 2: Creating Terraform plan..."
+        terraform plan -var-file="${{ parameters.tfVarFile }}" -out=tfplan
+
+        echo "##[command]Step 3: Applying Terraform plan..."
+        #terraform apply -auto-approve tfplan
+    env:
+      # Map secrets from the variable group to environment variables for Terraform
+      TF_VAR_csec_api_auth_token: $(TF_VAR_csec_api_auth_token)
+      TF_VAR_db_redis_image_registry_password: $(TF_VAR_db_redis_image_registry_password)

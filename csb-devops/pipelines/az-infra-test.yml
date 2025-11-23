@@ -1,0 +1,59 @@
+# /az-infra-test.yml
+#
+# Description:
+# This pipeline is for testing the custom 'csb-terraform-agent' container image.
+# It verifies that the image can be pulled from GHCR, contains the correct tool
+# versions, and can successfully authenticate with Azure.
+
+# Manual trigger only.
+trigger: none
+pr: none
+
+# Define the container resource from GitHub Packages.
+resources:
+  containers:
+    - container: csb-build-container
+      image: ghcr.io/hrithviks/csb-terraform-agent:latest
+      endpoint: "csb-github-registry"
+
+# Use the self-hosted agent pool.
+pool:
+  name: "csb-az-devops-agent-pool" # For now, hardcoded for testing
+
+jobs:
+  - job: Image_Validation
+    displayName: "Validate Image and Tools"
+
+    # This job will run inside the 'csb-build-container' container.
+    # The pipeline will automatically test pulling the image from GHCR.
+    container: csb-build-container
+
+    # Define environment variables to be passed to the container.
+    # The entrypoint.sh script will use these to validate tool versions.
+    variables:
+      # Name of the Azure service connection for authentication.
+      azureServiceConnection: "csb-az-devops-main"
+
+    steps:
+      # Step 1: Validate the version of installed tools in the container.
+      # Pass variables to the entrypoint.sh script from the pipeline.
+      - task: CmdLine@2
+        displayName: "Validate Tools Version"
+        inputs:
+          script: |
+            /usr/local/bin/entrypoint.sh
+
+      # Step 2 : Test Azure connection via Azure CLI.
+      # "csb-az-devops-main" is the AzureRM service connection with managed identity.
+      - task: AzureCLI@2
+        displayName: "Test Azure Connection"
+        inputs:
+          azureSubscription: "csb-az-devops-main"
+          scriptType: "bash"
+          scriptLocation: "inlineScript"
+          inlineScript: |
+            echo "Test Step 1: Verifying Azure authentication"
+            echo "Successfully logged in to Azure."
+            echo "Displaying current account details:"
+            az account show -o table
+            echo "Azure connection test successful."
