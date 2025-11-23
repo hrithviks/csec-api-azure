@@ -73,7 +73,7 @@ steps:
         terraform plan -var-file="${{ parameters.tfVarFile }}" -out=tfplan
 
         echo "##[command]Step 3: Applying Terraform plan..."
-        #terraform apply -auto-approve tfplan
+        terraform apply -auto-approve tfplan
     env:
       # Map secrets from the variable group to environment variables for Terraform
       TF_VAR_csec_api_auth_token: $(TF_VAR_csec_api_auth_token)
