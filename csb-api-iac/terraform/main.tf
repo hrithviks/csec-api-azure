@@ -57,7 +57,7 @@ locals {
     environment     = var.app_environment
     contact_info    = "csbapiadmin@csecbridge.org"
     app_name        = "csb-api-app"
-    build_timestamp = format("%sZ", formatdate("YYYY-MM-DD'T'HH:MM:SS", timestamp()))
+    build_timestamp = formatdate("YYYY-MM-DD'T'HH:MM:ssZ", timestamp())
   }
 }
 
