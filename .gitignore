@@ -2,6 +2,7 @@ setup*
 plan*
 venv
 .terraform*
+terraform.tfstate*
 _*.*
 _*.tf
 *.zip
