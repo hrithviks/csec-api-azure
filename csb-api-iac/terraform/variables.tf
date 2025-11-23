@@ -183,6 +183,7 @@ variable "db_redis_image_registry_user" {
 variable "db_redis_image_registry_password" {
   type        = string
   description = "The password for the Redis image registry."
+  sensitive   = true
 }
 
 variable "db_redis_image" {

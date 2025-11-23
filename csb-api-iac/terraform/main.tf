@@ -54,9 +54,10 @@ separation of concerns. The dependency flow is as follows:
 
 locals {
   csb_resource_tags = {
-    environment  = var.app_environment
-    contact_info = "csbapiadmin@csecbridge.org"
-    app_name     = "CSB-API-Service"
+    environment     = var.app_environment
+    contact_info    = "csbapiadmin@csecbridge.org"
+    app_name        = "csb-api-app"
+    build_timestamp = format("%sZ", formatdate("YYYY-MM-DD'T'HH:MM:SS", timestamp()))
   }
 }
 
@@ -195,19 +196,19 @@ module "app_service" {
 
   # App environment variables
   app_environment_vars = {
-    "API_AUTH_TOKEN" : var.csec_api_auth_token
-    "CACHE_TTL_SECONDS" : var.csec_api_cache_ttl_seconds
-    "POSTGRES_HOST" : module.databases.postgres_server_fqdn
-    "POSTGRES_PORT" : var.csec_api_postgres_port
-    "POSTGRES_USER" : module.databases.postgres_admin_username
-    "POSTGRES_PASSWORD" : module.databases.postgres_admin_password
-    "POSTGRES_DB" : module.databases.postgres_db_name
-    "POSTGRES_MAX_CONN" : var.csec_api_postgres_max_conn
-    "REDIS_HOST" : module.databases.redis_ip_address
-    "REDIS_PORT" : var.csec_api_redis_port
-    "REDIS_USER" : local.db_redis_api_user
-    "REDIS_PASSWORD" : module.databases.redis_csb_api_user_password
-    "ALLOWED_ORIGIN" : var.csec_api_allowed_origin
+    "API_AUTH_TOKEN"    = var.csec_api_auth_token
+    "CACHE_TTL_SECONDS" = var.csec_api_cache_ttl_seconds
+    "POSTGRES_HOST"     = module.databases.postgres_server_fqdn
+    "POSTGRES_PORT"     = var.csec_api_postgres_port
+    "POSTGRES_USER"     = module.databases.postgres_admin_username
+    "POSTGRES_PASSWORD" = module.databases.postgres_admin_password
+    "POSTGRES_DB"       = module.databases.postgres_db_name
+    "POSTGRES_MAX_CONN" = var.csec_api_postgres_max_conn
+    "REDIS_HOST"        = module.databases.redis_ip_address
+    "REDIS_PORT"        = var.csec_api_redis_port
+    "REDIS_USER"        = local.db_redis_api_user
+    "REDIS_PASSWORD"    = module.databases.redis_csb_api_user_password
+    "ALLOWED_ORIGIN"    = var.csec_api_allowed_origin
   }
 
   # Wait for secuity and database modules

@@ -140,7 +140,6 @@ app_service_flask_startup_command            = "pip install -r requirements.txt 
 app_service_py_version                       = "3.12"
 
 # API environment variables
-csec_api_auth_token        = null # For demo only. Secrets should be outside variable file.
 csec_api_cache_ttl_seconds = 300
 csec_api_postgres_port     = 5432
 csec_api_postgres_max_conn = 10
