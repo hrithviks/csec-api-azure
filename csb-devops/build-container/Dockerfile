@@ -30,6 +30,16 @@ RUN apt-get update && \
     # Clean up apt cache to keep the layer lean.
     rm -rf /var/lib/apt/lists/*
 
+# Install Docker CLI. This allows the container to execute docker commands
+# by communicating with the host's Docker daemon via a mounted socket.
+RUN install -m 0755 -d /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc && \
+    chmod a+r /etc/apt/keyrings/docker.asc && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
+    apt-get update && \
+    apt-get install -y docker-ce-cli
+
 # Install Azure CLI. This is in a separate layer for better caching.
 RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
 
@@ -61,6 +71,7 @@ COPY --from=builder /usr/local/bin/terraform /usr/local/bin/terraform
 COPY --from=builder /usr/bin/az /usr/bin/az
 COPY --from=builder /opt/az /opt/az
 COPY --from=builder /opt/az/bin/flake8 /usr/local/bin/flake8
+COPY --from=builder /usr/bin/docker /usr/bin/docker
 
 # Set the entrypoint to custom script. All commands will now run through this script first.
 ENTRYPOINT ["entrypoint.sh"]
