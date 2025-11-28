@@ -160,8 +160,8 @@ class _Config:
 
         # Exit if required variables are missing
         if missing_vars:
-            error_message = f'Fatal error: Missing required environment \
-                variables {', '.join(missing_vars)}'
+            error_message = f"Fatal error: Missing required \
+                environment variables {', '.join(missing_vars)}"
             raise ConfigLoadError(error_message)
 
         # Load validated config into private attributes
