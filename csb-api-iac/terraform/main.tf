@@ -188,7 +188,6 @@ module "app_service" {
   # Pass in app-service-specific variables
   os_type               = var.app_service_os_type
   plan_sku              = var.app_service_plan_sku
-  py_version            = var.app_service_py_version
   flask_startup_command = var.app_service_flask_startup_command
 
   # Pass in dependencies from the network module
