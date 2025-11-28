@@ -1,0 +1,126 @@
+# /az-csec-infra.yml
+#
+# -----------------------------------------------------------------------------
+# Pipeline: csec-API-Service Infrastructure (Terraform)
+#
+# Description: This pipeline automates the deployment of the csec-api-service
+#              infrastructure using Terraform. It orchestrates deployments
+#              across multiple environments (Dev, Test, Prod) by leveraging a
+#              reusable deployment template.
+#
+# Trigger Configuration:
+# This pipeline is configured for manual execution. For continuous deployment,
+# a branch trigger with path filters for 'csec-api-iac/terraform/' should be
+# implemented.
+# -----------------------------------------------------------------------------
+
+trigger: none
+
+# Defines the container resource used for pipeline jobs. The jobs will run
+# inside this container, which is pre-configured with Terraform.
+resources:
+  containers:
+    - container: csec-build-container
+      image: $(imageName)
+      endpoint: "csec-github-registry"
+
+# Use the self-hosted agent pool
+pool:
+  name: "csec-az-devops-agent-pool"
+
+# Defines pipeline-level variables for configuration and parameterization.
+# A structured naming convention (e.g., config.*, dev.*) is used for clarity.
+variables:
+  # Links to the 'csec-terraform-secrets' variable group to securely access
+  # secrets like Terraform credentials.
+  - group: csec-terraform-secrets
+
+  # General Configuration
+  - name: config.terraformWorkingDirectory
+    value: "$(System.DefaultWorkingDirectory)/csec-api-iac/terraform"
+  - name: config.buildContainerImage
+    value: "ghcr.io/hrithviks/csec-build-container:latest"
+  - name: config.azureServiceConnection
+    value: "csec-az-devops-main"
+
+  # Dev Environment Configuration
+  - name: dev.tfVarFile
+    value: "csec-dev.tfvars"
+  - name: dev.tfStateFileKey
+    value: "dev.terraform.tfstate"
+
+  # Test Environment Configuration
+  - name: test.tfVarFile
+    value: "csec-test.tfvars"
+  - name: test.tfStateFileKey
+    value: "test.terraform.tfstate"
+
+stages:
+  # Development Deployment Stage
+  - stage: Deploy_Dev
+    displayName: "Deploy to Dev"
+    jobs:
+      - deployment: Terraform_Dev
+        displayName: "Terraform Plan & Apply (Dev)"
+        container: csec-build-container
+        environment: "csec-dev"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - template: templates/terraform.yml
+                  parameters:
+                    environmentName: "Dev"
+                    environmentDisplayName: "Development"
+                    tfVarFile: $(dev.tfVarFile)
+                    tfStateFileKey: $(dev.tfStateFileKey)
+                    azureServiceConnection: $(config.azureServiceConnection)
+                    terraformWorkingDirectory: $(config.terraformWorkingDirectory)
+  # Test Deployment Stage
+  - stage: Deploy_Test
+    displayName: "Deploy to Test"
+    dependsOn: Deploy_Dev # Set dependency on DEV stage
+    condition: false # Explicitly disable this stage
+    jobs:
+      - deployment: Terraform_Test
+        displayName: "Terraform Plan & Apply (Test)"
+        container: csec-build-container
+        environment: "csec-test"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - template: templates/terraform.yml
+                  parameters:
+                    environmentName: "Test"
+                    environmentDisplayName: "Test"
+                    tfVarFile: $(test.tfVarFile)
+                    tfStateFileKey: $(test.tfStateFileKey)
+                    azureServiceConnection: $(config.azureServiceConnection)
+                    terraformWorkingDirectory: $(config.terraformWorkingDirectory)
+  # Prod Deployment Stage
+  - stage: Deploy_Prod
+    displayName: "Deploy to Prod"
+    dependsOn: Deploy_Test # Set dependency on TEST stage
+    condition: false # Explicitly disable this stage
+    jobs:
+      # This targets an Azure DevOps Environment, allowing for approval gates.
+      - deployment: Terraform_Prod
+        displayName: "Terraform Plan & Apply (Prod)"
+        container: csec-build-container
+        environment: "csec-prod"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - template: templates/terraform.yml
+                  parameters:
+                    environmentName: "Prod"
+                    environmentDisplayName: "Production"
+                    tfVarFile: "csec-prod.tfvars" # Not moved to variables as it's unique to this disabled stage
+                    tfStateFileKey: "prod.terraform.tfstate" # Not moved to variables
+                    azureServiceConnection: $(config.azureServiceConnection)
+                    terraformWorkingDirectory: $(config.terraformWorkingDirectory)
