@@ -10,7 +10,7 @@
 #
 # Trigger Configuration:
 # This pipeline is configured for manual execution. For continuous deployment,
-# a branch trigger with path filters for 'csec-api-iac/terraform/' should be
+# a branch trigger with path filters for 'csb-api-iac/terraform/' should be
 # implemented.
 # -----------------------------------------------------------------------------
 
@@ -21,7 +21,7 @@ trigger: none
 resources:
   containers:
     - container: csec-build-container
-      image: $(imageName)
+      image: $(config.buildContainerImage)
       endpoint: "csec-az-github-registry"
 
 # Use the self-hosted agent pool
@@ -37,7 +37,7 @@ variables:
 
   # General Configuration
   - name: config.terraformWorkingDirectory
-    value: "$(System.DefaultWorkingDirectory)/csec-api-iac/terraform"
+    value: "$(System.DefaultWorkingDirectory)/csb-api-iac/terraform"
   - name: config.buildContainerImage
     value: "ghcr.io/hrithviks/csec-build-container:latest"
   - name: config.azureServiceConnection

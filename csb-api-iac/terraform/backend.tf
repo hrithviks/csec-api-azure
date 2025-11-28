@@ -36,9 +36,9 @@ following enhancements to secure the state file and improve resiliency.
 
 terraform {
   backend "azurerm" {
-    resource_group_name  = "csb-az-devops-rg"
-    storage_account_name = "csbinfrastatev1"
-    container_name       = "csb-infra-state-v1"
+    resource_group_name  = "csec-az-devops-rg"
+    storage_account_name = "csecinfracontainer"
+    container_name       = "csec-infra-state-v1"
     key                  = "build.tfstate"
   }
 }
