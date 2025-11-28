@@ -151,6 +151,25 @@ variable "csec_api_allowed_origin" {
   default     = "localhost"
 }
 
+# Container Registry variables
+
+variable "app_ghcr_user" {
+  type        = string
+  description = "The username for the private Docker registry."
+  sensitive   = true
+}
+
+variable "app_ghcr_pswd" {
+  type        = string
+  description = "The password (or PAT) for the private Docker registry."
+  sensitive   = true
+}
+
+variable "app_image_name" {
+  type        = string
+  description = "The URL of the private Docker image with the tag"
+}
+
 ####################
 # Database Section #
 ####################
