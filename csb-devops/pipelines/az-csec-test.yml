@@ -1,0 +1,65 @@
+# /az-csec-test.yml
+#
+# -----------------------------------------------------------------------------
+# Pipeline: Build Container Validation
+#
+# Description:
+# This pipeline validates the custom 'csec-build-container' image. It verifies
+# that the image can be pulled from GHCR, contains the expected tools, and can
+# successfully authenticate with Azure.
+# -----------------------------------------------------------------------------
+
+# This pipeline is configured for manual execution only.
+trigger: none
+pr: none
+
+# Defines the container resource to be used for the pipeline jobs.
+resources:
+  containers:
+    - container: csec-build-container
+      image: $(config.buildContainerImage)
+      endpoint: "csec-github-registry"
+
+# Specifies the self-hosted agent pool for job execution.
+pool:
+  name: "csec-az-devops-agent-pool"
+
+# Defines pipeline-level variables for configuration.
+variables:
+  # General Configuration
+  - name: config.azureServiceConnection
+    value: "csec-az-devops-main"
+  - name: config.buildContainerImage
+    value: "ghcr.io/hrithviks/csec-build-container:latest"
+
+jobs:
+  - job: Image_Validation
+    displayName: "Validate Image and Tools"
+
+    # Specifies that this job will run inside the defined container resource.
+    # This implicitly tests the ability to pull the image from the registry.
+    container: csec-build-container
+
+    steps:
+      # Step 1: Executes the container's entrypoint script to validate the
+      # presence and versions of the installed tools.
+      - task: CmdLine@2
+        displayName: "Validate Tools Version"
+        inputs:
+          script: |
+            /usr/local/bin/entrypoint.sh
+
+      # Step 2: Verifies that the container can successfully authenticate with
+      # Azure using the provided service connection.
+      - task: AzureCLI@2
+        displayName: "Test Azure Connection"
+        inputs:
+          azureSubscription: $(config.azureServiceConnection)
+          scriptType: "bash"
+          scriptLocation: "inlineScript"
+          inlineScript: |
+            echo "Test Step 1: Verifying Azure authentication"
+            echo "Successfully logged in to Azure."
+            echo "Displaying current account details:"
+            az account show -o table
+            echo "Azure connection test successful."
