@@ -12,7 +12,7 @@ FROM debian:bullseye-slim AS builder
 # Defines a build-time argument for the Terraform version. This allows for
 # easy version customization during the build process.
 # Example: docker build --build-arg TERRAFORM_VERSION=1.8.0 .
-ARG TERRAFORM_VERSION=1.13.0
+ARG TERRAFORM_VERSION=1.9.0
 
 # Sets the frontend to noninteractive to prevent apt-get from prompting for
 # user input, ensuring the build process is fully automated.
@@ -48,6 +48,9 @@ RUN /opt/az/bin/python3 -m pip install --no-cache-dir flake8
 # artifacts from the builder stage.
 FROM debian:bullseye-slim
 
+# Copy the updated CA certificates from the builder stage to ensure the final
+# image can trust external TLS endpoints.
+COPY --from=builder /etc/ssl/certs/ /etc/ssl/certs/
 # Copy the custom entrypoint script from the build context into the final image.
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 # Make the entrypoint script executable.
