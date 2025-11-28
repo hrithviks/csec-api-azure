@@ -3,8 +3,9 @@ plan*
 venv
 .terraform*
 terraform.tfstate*
-_*.*
 _*.tf
 *.zip
 *.DS*
 _docs
+_build*
+_backend*
