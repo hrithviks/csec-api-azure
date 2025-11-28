@@ -15,7 +15,7 @@
 #
 # Trigger Configuration:
 # This pipeline is configured for manual execution. For continuous integration,
-# a branch trigger with path filters for 'csec-api-app/' should be implemented.
+# a branch trigger with path filters for 'csb-api-app/' should be implemented.
 # -----------------------------------------------------------------------------
 
 trigger: none
@@ -42,7 +42,7 @@ variables:
 
   # Application Configuration
   - name: app.sourceDirectory
-    value: "$(System.DefaultWorkingDirectory)/csec-api-app"
+    value: "$(System.DefaultWorkingDirectory)/csb-api-app"
   - name: app.image.name
     value: "ghcr.io/hrithviks/csec-api-service"
   - name: app.image.tag
