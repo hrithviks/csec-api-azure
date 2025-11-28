@@ -136,7 +136,7 @@ app_service_storage_account_tier             = "Standard"
 app_service_storage_account_replication_type = "LRS"
 app_service_os_type                          = "Linux"
 app_service_plan_sku                         = "B1"
-app_service_flask_startup_command            = "gunicorn --bind 0.0.0.0:$PORT --workers 2 'run:app'"
+app_service_flask_startup_command            = "gunicorn --bind 0.0.0.0:$PORT --workers 2 run:app"
 
 # API environment variables
 csec_api_cache_ttl_seconds = 300
