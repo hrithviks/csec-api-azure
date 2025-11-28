@@ -190,6 +190,7 @@ module "app_service" {
   plan_sku = var.app_service_plan_sku
 
   # Container variables
+  docker_server_url     = var.app_ghcr_url
   docker_image_name     = var.app_image_name
   docker_username       = var.app_ghcr_user
   docker_password       = var.app_ghcr_pswd

@@ -153,6 +153,12 @@ variable "csec_api_allowed_origin" {
 
 # Container Registry variables
 
+variable "app_ghcr_url" {
+  type        = string
+  description = "The URL of the Docker registry."
+  default     = "https://ghcr.io"
+}
+
 variable "app_ghcr_user" {
   type        = string
   description = "The username for the private Docker registry."

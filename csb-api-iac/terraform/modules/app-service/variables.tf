@@ -108,6 +108,11 @@ variable "flask_startup_command" {
 
 # Container Registry variables
 
+variable "docker_server_url" {
+  type        = string
+  description = "The URL of the private Docker registry."
+}
+
 variable "docker_image_name" {
   type        = string
   description = "The URL of the private Docker image with the tag"
