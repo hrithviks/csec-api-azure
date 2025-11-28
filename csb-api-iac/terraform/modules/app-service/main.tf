@@ -93,11 +93,12 @@ resource "azurerm_linux_web_app" "main" {
 
   # Site configuration for the application
   site_config {
-    application_stack {
-      python_version = var.py_version
-    }
     always_on        = true
     app_command_line = var.flask_startup_command
+
+    application_stack {
+      docker_image_name = "mcr.microsoft.com/appsvc/staticsite:latest"
+    }
   }
 
   # Environment variables
@@ -106,6 +107,8 @@ resource "azurerm_linux_web_app" "main" {
 
   lifecycle {
     ignore_changes = [
+      # Allow CI/CD pipeline to change the container image without causing terraform drift
+      site_config[0].application_stack[0].docker_image_name,
       app_settings["WEBSITES_ENABLE_APP_SERVICE_STORAGE"],
     ]
   }

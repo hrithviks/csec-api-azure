@@ -68,16 +68,6 @@ variable "plan_sku" {
   }
 }
 
-variable "py_version" {
-  type        = string
-  description = "The Python version for the application."
-
-  validation {
-    condition     = contains(["3.12", "3.11", "3.10"], var.py_version)
-    error_message = "Invalid Python version. It must be greater than or equal to 3.10."
-  }
-}
-
 variable "storage_account" {
   type        = string
   description = "The storage account for App Service logs."
