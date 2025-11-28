@@ -78,3 +78,6 @@ steps:
       # Map secrets from the variable group to environment variables for Terraform
       TF_VAR_csec_api_auth_token: $(TF_VAR_csec_api_auth_token)
       TF_VAR_db_redis_image_registry_password: $(TF_VAR_db_redis_image_registry_password)
+      TF_VAR_app_ghcr_pswd: $(TF_VAR_app_ghcr_pswd)
+      TF_VAR_app_ghcr_user: $(TF_VAR_app_ghcr_user)
+      TF_VAR_app_image_name: $(TF_VAR_app_image_name)
