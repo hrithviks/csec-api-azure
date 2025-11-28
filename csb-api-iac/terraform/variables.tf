@@ -114,11 +114,6 @@ variable "app_service_flask_startup_command" {
   description = "The startup command for the Flask app."
 }
 
-variable "app_service_py_version" {
-  type        = string
-  description = "The Python version required for the application."
-}
-
 # Environment variables for the CSB-API
 variable "csec_api_auth_token" {
   type        = string
