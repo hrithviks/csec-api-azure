@@ -106,6 +106,25 @@ variable "flask_startup_command" {
   description = "The startup command for the Flask app."
 }
 
+# Container Registry variables
+
+variable "docker_image_name" {
+  type        = string
+  description = "The URL of the private Docker image with the tag"
+}
+
+variable "docker_username" {
+  type        = string
+  description = "The username for the private Docker registry."
+  sensitive   = true
+}
+
+variable "docker_password" {
+  type        = string
+  description = "The password (or PAT) for the private Docker registry."
+  sensitive   = true
+}
+
 variable "app_environment_vars" {
   type        = map(any)
   description = "The map of all environment variables for the application."
