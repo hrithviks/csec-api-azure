@@ -186,8 +186,13 @@ module "app_service" {
   storage_account_replication_type = var.app_service_storage_account_replication_type
 
   # Pass in app-service-specific variables
-  os_type               = var.app_service_os_type
-  plan_sku              = var.app_service_plan_sku
+  os_type  = var.app_service_os_type
+  plan_sku = var.app_service_plan_sku
+
+  # Container variables
+  docker_image_name     = var.app_image_name
+  docker_username       = var.app_ghcr_user
+  docker_password       = var.app_ghcr_pswd
   flask_startup_command = var.app_service_flask_startup_command
 
   # Pass in dependencies from the network module
