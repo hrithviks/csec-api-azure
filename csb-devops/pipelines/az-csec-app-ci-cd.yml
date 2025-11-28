@@ -36,7 +36,7 @@ variables:
   - name: config.azureServiceConnection
     value: "csec-az-devops-main"
   - name: config.githubRegistryServiceConnection
-    value: "csec-github-registry"
+    value: "csec-az-github-registry"
   - name: config.buildContainerImage
     value: "ghcr.io/hrithviks/csec-build-container:latest"
 

@@ -18,7 +18,7 @@ resources:
   containers:
     - container: csec-build-container
       image: $(config.buildContainerImage)
-      endpoint: "csec-github-registry"
+      endpoint: "csec-az-github-registry"
 
 # Specifies the self-hosted agent pool for job execution.
 pool:

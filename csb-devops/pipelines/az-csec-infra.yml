@@ -22,7 +22,7 @@ resources:
   containers:
     - container: csec-build-container
       image: $(imageName)
-      endpoint: "csec-github-registry"
+      endpoint: "csec-az-github-registry"
 
 # Use the self-hosted agent pool
 pool:
