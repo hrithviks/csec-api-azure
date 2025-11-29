@@ -96,8 +96,11 @@ module "network" {
   nsg_rules                       = var.vnet_network_security_group_rules
   nsg_map                         = var.vnet_nsg_map
 
-  # The depends_on is removed as the circular dependency is broken
-  # depends_on = [module.security]
+  # DevOps VNet Peering
+  enable_devops_vnet_peering         = true
+  devops_vnet_resource_group_name    = var.devops_vnet_resource_group_name
+  devops_vnet_name                   = var.devops_vnet_name
+  devops_agent_subnet_address_prefix = var.devops_agent_subnet_address_prefix
 }
 
 output "debug_vnet_cidr" {

@@ -85,6 +85,25 @@ variable "vnet_network_security_group_rules" {
   description = "The network security groups rules."
 }
 
+# DevOps VNet Peering
+variable "devops_vnet_resource_group_name" {
+  description = "The name of the resource group containing the existing DevOps VNet."
+  type        = string
+  default     = "csec-az-devops-rg"
+}
+
+variable "devops_vnet_name" {
+  description = "The name of the existing DevOps VNet to peer with."
+  type        = string
+  default     = "csec-az-devops-vnet"
+}
+
+variable "devops_agent_subnet_address_prefix" {
+  description = "The address prefix of the DevOps agent subnet (e.g., '10.1.1.0/24'). Used for the NSG rule."
+  type        = string
+  default     = "10.1.1.0/24"
+}
+
 #######################
 # App-Service Section #
 #######################
