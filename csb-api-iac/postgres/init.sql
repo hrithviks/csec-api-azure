@@ -32,38 +32,46 @@
 -- Set timezone to UTC for consistency across the application
 set timezone = 'utc';
 
--- Main App Role for Managing Application Objects
-create role csb_app;
-alter role csb_app with login;
-grant connect on database csb_app_db to csb_app;
-grant create on schema public to csb_app;
+-- Helper procedure to create a role only if it does not already exist.
+-- This makes the script idempotent and safe to re-run.
+CREATE OR REPLACE PROCEDURE create_role_if_not_exists(role_name text)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = role_name) THEN
+        EXECUTE format('CREATE ROLE %I WITH LOGIN', role_name);
+    END IF;
+END;
+$$;
+
+-- Create roles idempotently using the helper procedure.
+CALL create_role_if_not_exists('csb_app');
+CALL create_role_if_not_exists('csb_api_user');
+CALL create_role_if_not_exists('csb_aws_user');
+CALL create_role_if_not_exists('csb_azure_user');
+
+-- Grant connect privileges. (Idempotent by nature).
+-- The database name 'csb_app_db' is assumed to be stable for this project.
+GRANT CONNECT ON DATABASE csb_app_db TO csb_app;
+GRANT CONNECT ON DATABASE csb_app_db TO csb_api_user;
+GRANT CONNECT ON DATABASE csb_app_db TO csb_aws_user;
+GRANT CONNECT ON DATABASE csb_app_db TO csb_azure_user;
 
 -- Main App Schema, tied to App Role
-create schema csb_app authorization csb_app;
-grant usage, create on schema csb_app to csb_app;
+CREATE SCHEMA IF NOT EXISTS csb_app AUTHORIZATION csb_app;
 
--- API-Service User Role; Password to be set later on by admin user.
-create role csb_api_user;
-alter role csb_api_user with login;
-grant connect on database csb_app_db to csb_api_user;
+-- Grant schema privileges. (Idempotent by nature).
+GRANT CREATE ON SCHEMA public TO csb_app;
+grant usage, create on schema csb_app to csb_app;
 grant usage on schema public to csb_api_user;
 grant usage on schema csb_app to csb_api_user;
-
--- AWS-Worker User Role; Password to be set later on by admin user.
-create role csb_aws_user;
-alter role csb_aws_user with login;
-grant connect on database csb_app_db to csb_aws_user;
 grant usage on schema public to csb_aws_user;
 grant usage on schema csb_app to csb_aws_user;
-
--- Azure Worker User Role; Password to be set later on by admin user.
-create role csb_azure_user;
-alter role csb_azure_user with login;
-grant connect on database csb_app_db to csb_azure_user;
 grant usage on schema public to csb_azure_user;
 grant usage on schema csb_app to csb_azure_user;
 
 -- Explicitly REVOKE all other permissions to enforce least privilege.
+-- REVOKE commands do not error if the privilege is not granted, so they are safe to re-run.
 revoke truncate, delete, references, trigger on all tables in schema public from csb_api_user;
 revoke truncate, delete, references, trigger on all tables in schema csb_app from csb_api_user;
 
@@ -73,11 +81,11 @@ revoke truncate, delete, references, trigger on all tables in schema csb_app fro
 revoke truncate, delete, references, trigger on all tables in schema public from csb_azure_user;
 revoke truncate, delete, references, trigger on all tables in schema csb_app from csb_azure_user;
 
--- Set search path for the roles to both public and csb_app
+-- Set search path for the roles. ALTER ROLE is idempotent.
 alter role csb_app set search_path = csb_app, public;
 alter role csb_api_user set search_path = csb_app, public;
 alter role csb_aws_user set search_path = csb_app, public;
 alter role csb_azure_user set search_path = csb_app, public;
 
 -- Log a message to the console upon successful completion
-\echo 'CSecBridge database initialized successfully with roles, tables, and permissions.'
+\echo 'CSecBridge database initialization script completed successfully.'
