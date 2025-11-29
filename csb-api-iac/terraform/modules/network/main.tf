@@ -84,6 +84,74 @@ resource "azurerm_private_dns_zone_virtual_network_link" "main" {
   virtual_network_id    = azurerm_virtual_network.main.id
 }
 
+locals {
+  # Dynamically create the NSG rule for the DevOps agent if peering is enabled.
+  # This creates a map with one entry ("Allow-DevOps-Agent-Inbound-Postgres") if true, or an empty map if false.
+  devops_agent_nsg_rule = var.enable_devops_vnet_peering ? {
+    "Allow-DevOps-Agent-Inbound-Postgres" = {
+      nsg_key                    = "csec-pep-nsg"
+      priority                   = 110
+      direction                  = "Inbound"
+      access                     = "Allow"
+      protocol                   = "Tcp"
+      source_port_range          = "*"
+      destination_port_range     = "5432"
+      destination_port_ranges    = null
+      source_address_prefix      = var.devops_agent_subnet_address_prefix
+      destination_address_prefix = "*"
+      source_subnet_key          = null
+      destination_ip_var         = null
+    }
+  } : {}
+
+  # Merge the dynamically created rule with the rules passed in from the variable file.
+  all_nsg_rules = merge(var.nsg_rules, local.devops_agent_nsg_rule)
+}
+
+######################################################################
+# DevOps VNet Peering and Connectivity (Conditional)                 #
+# Creates peering, DNS links, and NSG rules to the DevOps agent VNet #
+######################################################################
+
+# Look up the existing DevOps VNet using the provided name and resource group.
+# This data source will only be queried if peering is enabled.
+data "azurerm_virtual_network" "devops_vnet" {
+  count               = var.enable_devops_vnet_peering ? 1 : 0
+  name                = var.devops_vnet_name
+  resource_group_name = var.devops_vnet_resource_group_name
+}
+
+# 1. VNet Peering: App VNet -> DevOps VNet
+resource "azurerm_virtual_network_peering" "app_to_devops" {
+  count                     = var.enable_devops_vnet_peering ? 1 : 0
+  name                      = "peer-app-to-devops"
+  resource_group_name       = var.resource_group_name
+  virtual_network_name      = azurerm_virtual_network.main.name
+  remote_virtual_network_id = data.azurerm_virtual_network.devops_vnet[0].id
+}
+
+# 1. VNet Peering: DevOps VNet -> App VNet (return path)
+resource "azurerm_virtual_network_peering" "devops_to_app" {
+  count                     = var.enable_devops_vnet_peering ? 1 : 0
+  name                      = "peer-devops-to-app"
+  resource_group_name       = data.azurerm_virtual_network.devops_vnet[0].resource_group_name
+  virtual_network_name      = data.azurerm_virtual_network.devops_vnet[0].name
+  remote_virtual_network_id = azurerm_virtual_network.main.id
+}
+
+# 2. Private DNS Zone Link: Link the PostgreSQL DNS zone to the DevOps VNet.
+# This allows the DevOps agent to resolve the private IP of the database.
+resource "azurerm_private_dns_zone_virtual_network_link" "devops_postgres_dns_link" {
+  count                 = var.enable_devops_vnet_peering && contains(keys(azurerm_private_dns_zone.main), "postgres") ? 1 : 0
+  name                  = "${var.devops_vnet_name}-postgres-dns-link"
+  resource_group_name   = var.resource_group_name
+  private_dns_zone_name = azurerm_private_dns_zone.main["postgres"].name
+  virtual_network_id    = data.azurerm_virtual_network.devops_vnet[0].id
+
+  # Ensure this runs after the peering is established.
+  depends_on = [azurerm_virtual_network_peering.app_to_devops]
+}
+
 ####################################
 # Network security group resources #
 ####################################
@@ -114,7 +182,7 @@ resource "azurerm_network_security_group" "main" {
 
 # NSG security rules
 resource "azurerm_network_security_rule" "main" {
-  for_each = var.nsg_rules
+  for_each = local.all_nsg_rules
   name     = each.key # Use the map key as the rule name
 
   # Use the 'nsg_key' from the variable to look up the correct NSG ID

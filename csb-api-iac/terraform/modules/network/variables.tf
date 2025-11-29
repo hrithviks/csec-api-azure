@@ -99,3 +99,31 @@ variable "nsg_rules" {
   }))
   description = "A map of NSG rules. The key is the unique rule name."
 }
+
+#################################
+# DevOps VNet Peering Variables #
+#################################
+
+variable "enable_devops_vnet_peering" {
+  description = "A boolean flag to enable or disable peering with the DevOps VNet. Set to true to create peering resources."
+  type        = bool
+  default     = false
+}
+
+variable "devops_vnet_resource_group_name" {
+  description = "The name of the resource group containing the existing DevOps VNet."
+  type        = string
+  default     = ""
+}
+
+variable "devops_vnet_name" {
+  description = "The name of the existing DevOps VNet to peer with."
+  type        = string
+  default     = ""
+}
+
+variable "devops_agent_subnet_address_prefix" {
+  description = "The address prefix of the DevOps agent subnet (e.g., '10.1.1.0/24'). Used for the NSG rule."
+  type        = string
+  default     = ""
+}
