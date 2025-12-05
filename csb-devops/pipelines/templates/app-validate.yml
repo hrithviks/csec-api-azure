@@ -1,0 +1,251 @@
+# /templates/app-validate.yml
+#
+# -------------------------------------------------------------------------- #
+# Template: API Integration Validation                                       #
+# -------------------------------------------------------------------------- #
+# Description:
+# This is a reusable Azure DevOps template for running integration tests
+# against a deployed csec-API-Service application. It performs a basic
+# smoke test by creating a new request (POST) and then retrieving its
+# status (GET), validating that the core API functionality is working
+# post-deployment.
+#
+# Parameters:
+# - displayName: (string) The display name for the overall testing task.
+# - azureServiceConnection: (string) The name of the Azure DevOps service
+#   connection used to authenticate with Azure.
+# - appName: (string) The name of the Azure App Service to test.
+# - vaultName: (string) The name of the Azure Key Vault for secrets.
+# - environmentType: (string) The type of environment ('dev', 'test', 'prod').
+#   Used to conditionally run certain tests.
+# - resourceGroupName: (string) The name of the resource group containing
+#   the App Service.
+# -------------------------------------------------------------------------- #
+
+parameters:
+  # The overall display name for the group of test steps.
+  - name: displayName
+    type: string
+    default: "Run API Integration Tests"
+  # The service connection for Azure CLI authentication.
+  - name: azureServiceConnection
+    type: string
+  # The name of the target App Service instance.
+  - name: appName
+    type: string
+  # The name of the Azure Key Vault for DB/Redis credentials.
+  - name: vaultName
+    type: string
+  # The type of environment, used for conditional checks.
+  - name: environmentType
+    type: string
+    default: 'dev'
+  # The resource group of the target App Service.
+  - name: resourceGroupName
+    type: string
+
+steps:
+  # Step 1: Generate a dynamic JSON payload for the POST request.
+  # This creates a 'payload.json' file in the agent's working directory.
+  # The file will be used by the 'curl' command in a later step.
+  - task: Bash@3
+    displayName: 'Generate Test Payload'
+    inputs:
+      targetType: 'inline'
+      script: |
+        set -e
+        CLIENT_REQ_ID="test-$(date +%s)"
+        echo "Generating payload.json for client request ID: $CLIENT_REQ_ID"
+        cat <<EOF > payload.json
+        {
+          "client_request_id": "$CLIENT_REQ_ID",
+          "target_cloud": "aws",
+          "account_id": "216989093471",
+          "context": {
+              "principal": "csb_test_user_1",
+              "principal_type": "User",
+              "action": "add",
+              "entitlement": "CSB-Test-S3-Policy",
+              "entitlement_type": "custom",
+              "duration_minutes": 60
+          }
+        }
+        EOF
+        echo "payload.json created successfully."
+        cat payload.json
+
+  # Step 2: Fetch dynamic test parameters from the live Azure environment.
+  # This task uses the Azure CLI to get the application's public URL and
+  # its configured API authentication token, along with DB and Redis secrets.
+  # These values are then set as
+  # output variables to be used by subsequent tasks in the job. The auth
+  # token is marked as a secret to prevent it from being exposed in logs.
+  - task: AzureCLI@2
+    name: GetTestParameters
+    displayName: 'Fetch App URL and Auth Token'
+    inputs:
+      azureSubscription: ${{ parameters.azureServiceConnection }}
+      scriptType: "bash"
+      scriptLocation: "inlineScript"
+      inlineScript: |
+        set -e
+        echo "Fetching App Service hostname for '${{ parameters.appName }}'..."
+        APP_URL="https://$(az webapp show --name '${{ parameters.appName }}' --resource-group '${{ parameters.resourceGroupName }}' --query 'defaultHostName' -o tsv)"
+        if [ -z "$APP_URL" ]; then
+          echo "##[error]Failed to retrieve App Service URL."
+          exit 1
+        fi
+        echo "##vso[task.setvariable variable=AppUrl;isOutput=true]$APP_URL"
+
+        echo "Fetching API authentication token from App Service settings..."
+        API_AUTH_TOKEN=$(az webapp config appsettings list --name '${{ parameters.appName }}' --resource-group '${{ parameters.resourceGroupName }}' --query "[?name=='API_AUTH_TOKEN'].value" -o tsv)
+        if [ -z "$API_AUTH_TOKEN" ]; then
+          echo "##[error]Failed to retrieve API_AUTH_TOKEN from App Service settings."
+          exit 1
+        fi
+        echo "##vso[task.setvariable variable=ApiAuthToken;isOutput=true;issecret=true]$API_AUTH_TOKEN"
+
+        echo "Fetching DB and Redis connection details from Key Vault..."
+        DB_HOST=$(az keyvault secret show --vault-name "${{ parameters.vaultName }}" --name "postgres-db-host" --query "value" -o tsv)
+        DB_NAME=$(az keyvault secret show --vault-name "${{ parameters.vaultName }}" --name "postgres-db-name" --query "value" -o tsv)
+        DB_USER="csb_api_user" # The user context for the test
+        DB_PASSWORD=$(az keyvault secret show --vault-name "${{ parameters.vaultName }}" --name "postgres-db-csb-api-user-password" --query "value" -o tsv)
+
+        REDIS_HOST=$(az webapp config appsettings list --name '${{ parameters.appName }}' --resource-group '${{ parameters.resourceGroupName }}' --query "[?name=='REDIS_HOST'].value" -o tsv)
+        REDIS_PASSWORD=$(az webapp config appsettings list --name '${{ parameters.appName }}' --resource-group '${{ parameters.resourceGroupName }}' --query "[?name=='REDIS_PASSWORD'].value" -o tsv)
+        REDIS_USER=$(az webapp config appsettings list --name '${{ parameters.appName }}' --resource-group '${{ parameters.resourceGroupName }}' --query "[?name=='REDIS_USER'].value" -o tsv)
+
+        echo "##vso[task.setvariable variable=DbHost;isOutput=true]$DB_HOST"
+        echo "##vso[task.setvariable variable=DbName;isOutput=true]$DB_NAME"
+        echo "##vso[task.setvariable variable=DbUser;isOutput=true]$DB_USER"
+        echo "##vso[task.setvariable variable=DbPassword;isOutput=true;issecret=true]$DB_PASSWORD"
+        echo "##vso[task.setvariable variable=RedisUser;isOutput=true]$REDIS_USER"
+        echo "##vso[task.setvariable variable=RedisHost;isOutput=true]$REDIS_HOST"
+        echo "##vso[task.setvariable variable=RedisPassword;isOutput=true;issecret=true]$REDIS_PASSWORD"
+
+  # Step 3: Execute the POST request test.
+  # This task sends the generated 'payload.json' to the API's /requests
+  # endpoint. It validates that the HTTP response code is '202 Accepted'.
+  # If the test passes, it parses the 'correlation_id' from the response
+  # body and sets it as an output variable for the next step. The script
+  # will fail the task if the status code is not 202.
+  - task: Bash@3
+    name: PostRequest
+    displayName: 'Execute POST Request Test'
+    env:
+      APP_URL: $(GetTestParameters.AppUrl)
+      API_AUTH_TOKEN: $(GetTestParameters.ApiAuthToken)
+    inputs:
+      targetType: 'inline'
+      script: |
+        set -e
+        echo "Sending POST request to $APP_URL/api/v1/requests"
+        POST_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$APP_URL/api/v1/requests" \
+          -H "Content-Type: application/json" \
+          -H "X-Auth-Token: $API_AUTH_TOKEN" \
+          --data @payload.json)
+
+        HTTP_CODE=$(echo "$POST_RESPONSE" | tail -n1)
+        RESPONSE_BODY=$(echo "$POST_RESPONSE" | sed '$d')
+
+        if [ "$HTTP_CODE" -ne 202 ]; then
+          echo "##[error]POST test failed! Expected status 202, but got $HTTP_CODE. Response: $RESPONSE_BODY"
+          exit 1
+        fi
+
+        CORRELATION_ID=$(echo "$RESPONSE_BODY" | jq -r '.correlation_id')
+        echo "POST test passed. Received Correlation ID: $CORRELATION_ID"
+        echo "##vso[task.setvariable variable=CorrelationId;isOutput=true]$CORRELATION_ID"
+
+  # Step 4: Verify the database state.
+  # This task connects to the PostgreSQL database and confirms that a record
+  # was created for the correlation ID from the POST request.
+  - task: AzureCLI@2
+    displayName: 'Verify Database State'
+    env:
+      PGHOST: $(GetTestParameters.DbHost)
+      PGDATABASE: $(GetTestParameters.DbName)
+      PGUSER: $(GetTestParameters.DbUser)
+      PGPASSWORD: $(GetTestParameters.DbPassword)
+      CORRELATION_ID: $(PostRequest.CorrelationId)
+    inputs:
+      azureSubscription: ${{ parameters.azureServiceConnection }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        set -e
+        echo "Querying database for correlation ID: $CORRELATION_ID"
+        
+        # psql returns 1 if no rows are found, 0 if rows are found.
+        psql -t -c "SELECT 1 FROM csb_app.csb_requests WHERE correlation_id = '$CORRELATION_ID' LIMIT 1" | grep -q 1
+
+        echo "Database verification passed. Record found for correlation ID."
+
+  # Step 5: Verify the Redis cache and queue state.
+  # This task connects to Redis to perform two checks:
+  # 1. Cache Check: Confirms the status cache key was created with the correct 'queued' status.
+  # 2. Queue Check (Dev/Test only): Looks for the request payload in the Redis queue.
+  - task: AzureCLI@2
+    displayName: 'Verify Redis State (Cache & Queue)'
+    env:
+      REDIS_HOST: $(GetTestParameters.RedisHost)
+      REDIS_USER: $(GetTestParameters.RedisUser)
+      REDISCLI_AUTH: $(GetTestParameters.RedisPassword)
+      CORRELATION_ID: $(PostRequest.CorrelationId)
+    inputs:
+      azureSubscription: ${{ parameters.azureServiceConnection }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        set -e
+        CACHE_KEY="cache:status:$CORRELATION_ID"
+        echo "Checking Redis cache for key: $CACHE_KEY"
+
+        # Check Cache. The password is provided via the REDISCLI_AUTH environment
+        # variable for better security.
+        CACHE_VALUE=$(redis-cli -h $REDIS_HOST -p 6379 --user $REDIS_USER GET $CACHE_KEY)
+        if [[ -z "$CACHE_VALUE" || ! $(echo "$CACHE_VALUE" | jq -e '.status == "queued"') ]]; then
+          # The jq -e flag sets the exit code, allowing for a clean boolean check.
+          echo "##[error]Redis cache verification failed! Key not found or status is not 'queued'. Value: $CACHE_VALUE"
+          exit 1
+        fi
+        echo "Redis cache verification passed."
+
+        # Check Queue (only for dev and test environments)
+        if [ "${{ parameters.environmentType }}" != "prod" ]; then
+          QUEUE_KEY="queue:aws"
+          echo "Checking Redis queue '$QUEUE_KEY' for correlation ID..."
+          
+          # Look at the last 10 items in the queue without removing them
+          QUEUE_ITEMS=$(redis-cli -h $REDIS_HOST -p 6379 --user $REDIS_USER LRANGE $QUEUE_KEY 0 9)
+          if [[ ! "$QUEUE_ITEMS" =~ "$CORRELATION_ID" ]]; then
+            echo "##[error]Redis queue verification failed! Correlation ID not found in recent queue items."
+            exit 1
+          fi
+          echo "Redis queue verification passed."
+        fi
+
+  # Step 6: Execute the GET request test.
+  # This task uses the 'correlation_id' from the previous step to query the
+  # API for the request's status. It includes a short 'sleep' to allow for
+  # backend processing. The 'curl -f' flag automatically fails the task if
+  # the server returns an HTTP error (e.g., 404 Not Found, 500 Server Error).
+  - task: Bash@3
+    displayName: 'Execute GET Request Test'
+    env:
+      APP_URL: $(GetTestParameters.AppUrl)
+      API_AUTH_TOKEN: $(GetTestParameters.ApiAuthToken)
+      CORRELATION_ID: $(PostRequest.CorrelationId)
+    inputs:
+      targetType: 'inline'
+      script: |
+        set -e
+        echo "Waiting for backend processing..."
+        sleep 5
+
+        echo "Sending GET request for correlation ID: $CORRELATION_ID"
+        curl -f -s -X GET "$APP_URL/api/v1/requests/$CORRELATION_ID" \
+          -H "Content-Type: application/json" \
+          -H "X-Auth-Token: $API_AUTH_TOKEN"
+
+        echo -e "\nGET test passed. Successfully retrieved status for the request."

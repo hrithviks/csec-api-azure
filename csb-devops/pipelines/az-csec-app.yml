@@ -1,0 +1,455 @@
+# -----------------------------------------------------------------------------
+# Pipeline: csec-API-Service - CI/CD
+#
+# Overview:
+# This pipeline automates the CI/CD process for the csec-API-Service. It
+# validates application code, builds a secure container image, and deploys it
+# across multiple environments (Dev, Test) following a structured promotion model.
+#
+# Trigger Configuration:
+# This pipeline is configured for manual execution. For true CI/CD, a branch
+# trigger with path filters for 'csb-api-app/' should be implemented.
+#
+# -----------------------------------------------------------------------------
+#
+# Pipeline Stages and Jobs Breakdown:
+#
+# 1. Build Stage:
+#    This stage handles all Continuous Integration (CI) tasks. It validates
+#    code quality and security before producing a container image artifact.
+#    - Job: BuildImage
+#      - Step 1: Run SAST Scan (Bandit): Scans Python code for security flaws.
+#      - Step 2: Scan Dependencies (Trivy): Checks 'requirements.txt' for CVEs.
+#      - Step 3: Run Linting (Flake8): Enforces code style and quality.
+#      - Step 4: Build Docker Image: Creates the container image.
+#      - Step 5: Scan Docker Image (Trivy): Scans the built image for OS/package
+#        vulnerabilities before it is pushed.
+#      - Step 6: Push to GHCR: Publishes the validated image to the registry.
+#
+# 2. Deploy_Dev Stage:
+#    This stage deploys the application to the Development environment. It serves
+#    as the first gate for validating the deployment process and application health.
+#    - Job 1: Deploy_DB_Dev: Applies the latest schema changes from 'backend.sql'
+#      to the Dev database, ensuring it's ready for the new app version.
+#    - Job 2: Configure_Dev_App: Updates the App Service application settings,
+#      securely fetching secrets like database passwords from Key Vault at runtime.
+#    - Job 3: Deploy_App_Dev: A 'deployment' job that deploys the container
+#      image to the App Service and provides traceability in the 'csec-dev'
+#      Azure DevOps Environment.
+#    - Job 4: Post_Deployment_Validation_Dev: Runs a suite of integration and
+#      health check tests against the newly deployed application.
+#
+# 3. Deploy_Test Stage:
+#    (Currently disabled) This stage promotes the application to the Test
+#    environment for formal QA, UAT, and integration testing. It mirrors the
+#    Dev deployment process to ensure consistency.
+#    - Job 1: Deploy_DB_Test: Applies schema changes to the Test database.
+#    - Job 2: Configure_Test_App: Sets environment-specific variables and
+#      secrets for the Test App Service.
+#    - Job 3: Deploy_App_Test: Deploys the container image to the 'csec-test'
+#      Azure DevOps Environment.
+#    - Job 4: Post_Deployment_Validation_Test: Runs the same suite of
+#      integration tests against the Test environment.
+#
+# 4. Deploy_Prod Stage:
+#    (Gated) This is the final stage that deploys the application to Production.
+#    It is protected by two conditions: it only runs on 'release/*' branches,
+#    and it targets an Azure DevOps Environment ('csec-prod') that should be
+#    configured with a manual approval gate.
+#    - Job 1: Deploy_DB_Prod: Applies schema changes to the Prod database.
+#    - Job 2: Configure_Prod_App: Sets environment-specific variables for Prod.
+#    - Job 3: Deploy_App_Prod: Deploys the container image to the 'csec-prod'
+#      environment, pending approval.
+#    - Job 4: Post_Deployment_Validation_Prod: Runs validation tests against
+#      the live Production environment.
+#
+# 5. Post_Deployment_Notifications Stage:
+#    (Currently disabled) A final stage to send notifications (e.g., email,
+#    Teams message) about the overall success or failure of the pipeline run.
+#
+# -----------------------------------------------------------------------------
+
+trigger: none
+pr: none
+
+# Use the self-hosted agent pool
+pool:
+  name: "csec-az-devops-agent-pool"
+
+# Defines pipeline-level variables for configuration and parameterization.
+# A structured naming convention (e.g., config.*, app.*) is used for clarity.
+variables:
+  # Sets centrally defined variables for the pipeline
+  # CSEC_AZ_SERVICE_CONN - Service connecton for Azure Resource Manager.
+  # CSEC_GITHUB_SERVICE_CONN - Service connection for private github registry.
+  - group: csec-pipeline-vars
+
+  # Application Configuration
+  - name: app.sourceDirectory
+    value: "$(System.DefaultWorkingDirectory)/csb-api-app"
+  - name: app.image.name
+    value: "ghcr.io/hrithviks/csec-api-service"
+  - name: app.image.repository # Image name without the registry, for Docker@2 task
+    value: "hrithviks/csec-api-service"
+  - name: app.image.tag
+    value: "$(Build.BuildId)"
+
+# Define container resources used by the pipeline.
+# The jobs will run inside this container, which has Terraform and necessary
+# build tools (e.g., Flake8, Docker CLI). pre-installed into it.
+resources:
+  containers:
+    - container: csec-build-container
+      image: ghcr.io/hrithviks/csec-build-container:latest
+      endpoint: "csec-az-github-registry" # Service connection must be hardcoded here
+      # Mount the Docker socket from the host agent into the container.
+      options: -v /var/run/docker.sock:/var/run/docker.sock
+
+stages:
+  # ----------------------------
+  # Stage 1: CI - Build and Scan
+  # ----------------------------
+  - stage: Build
+    displayName: "Build and Push Docker Image"
+    jobs:
+      - job: BuildImage
+        displayName: "Build, Tag, and Push to GHCR"
+        container: csec-build-container
+        steps:
+          - checkout: self
+          - script: |
+              bandit -r . -ll
+            displayName: "Run SAST Scan with Bandit"
+            workingDirectory: $(app.sourceDirectory)
+
+          - script: |
+              trivy fs --severity HIGH,CRITICAL --exit-code 1 .
+            displayName: "Scan Dependencies with Trivy"
+            workingDirectory: "$(app.sourceDirectory)"
+
+          - script: |
+              flake8 .
+            displayName: "Run Code Linting with Flake8"
+            workingDirectory: $(app.sourceDirectory)
+
+          - task: Docker@2
+            displayName: "Login to GHCR"
+            inputs:
+              command: "login"
+              containerRegistry: $(CSEC_GITHUB_SERVICE_CONN)
+
+          - task: Docker@2
+            displayName: "Build Docker Image"
+            inputs:
+              command: "build"
+              repository: $(app.image.repository)
+              dockerfile: "$(app.sourceDirectory)/Dockerfile"
+              buildContext: "$(app.sourceDirectory)"
+              tags: |
+                local-scan
+                $(app.image.tag)
+                latest
+
+          - script: trivy image --severity HIGH,CRITICAL --exit-code 1 $(app.image.name):local-scan
+            displayName: "Scan Local Docker Image with Trivy"
+
+          - task: Docker@2
+            displayName: "Push Image to GHCR"
+            inputs:
+              command: "push"
+              repository: $(app.image.repository)
+              tags: |
+                $(app.image.tag)
+                latest
+
+          - task: Docker@2
+            displayName: "Logout from GHCR"
+            condition: always() # Ensures this step runs even if previous steps fail
+            inputs:
+              command: "logout"
+              containerRegistry: $(CSEC_GITHUB_SERVICE_CONN)
+
+  # -----------------------------------
+  # Stage 2: CD - Deploy to Development
+  # -----------------------------------
+  - stage: Deploy_Dev
+    displayName: "Deploy to Dev"
+    dependsOn: Build
+    variables:
+      - group: csec-app-dev-vars # Stage-scoped variables for Dev
+    jobs:
+      # Job 1: Deploy Database Schema to Dev
+      - job: Deploy_DB_Dev
+        displayName: "Deploy Database Schema to Dev"
+        container: csec-build-container
+        steps:
+          - checkout: self # Checkout the repo to get backend.sql
+          - template: templates/db-deploy.yml
+            parameters:
+              displayName: "Deploy Backend Objects to Dev DB"
+              azureServiceConnection: $(CSEC_AZ_SERVICE_CONN)
+              vaultName: $(KEY_VAULT_NAME)
+              dbHost: $(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-host" --query "value" -o tsv)
+              dbName: $(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-name" --query "value" -o tsv)
+              dbUser: "csb_app"
+              dbPasswordKey: "postgres-db-csb-app-user-password"
+              script: |
+                echo "Executing backend.sql on Dev database..."
+                psql -f "$(app.sourceDirectory)/backend.sql"
+
+      # Job 2: Configure App Environment Variables (Dev)
+      - job: Configure_Dev_App
+        displayName: "Configure App Environment Variables (Dev)"
+        dependsOn: Deploy_DB_Dev
+        container: csec-build-container
+        steps:
+          - checkout: none
+          - task: AzureCLI@2
+            displayName: "Update App Service Settings"
+            inputs:
+              azureSubscription: $(CSEC_AZ_SERVICE_CONN)
+              scriptType: "bash"
+              scriptLocation: "inlineScript"
+              inlineScript: |
+                set -e
+                echo "Fetching password from Key Vault..."
+                POSTGRES_PASSWORD=$(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-csb-api-user-password" --query "value" -o tsv)
+
+                echo "Updating App Service environment variables..."
+                az webapp config appsettings set -g $(RESOURCE_GROUP_NAME) -n $(APP_NAME) --settings "POSTGRES_USER=$(POSTGRES_USER)" "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
+
+                echo "App Service settings updated successfully."
+
+      # Job 3: Deploy Application to Dev
+      - deployment: Deploy_App_Dev
+        displayName: "Deploy App to Dev Environment"
+        dependsOn: Configure_Dev_App # Ensure configuration job finishes first
+        container: csec-build-container
+        environment: "csec-dev" # Targets an Azure DevOps Environment for tracking
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: none
+                - template: templates/app-deploy.yml
+                  parameters:
+                    azureServiceConnection: $(CSEC_AZ_SERVICE_CONN)
+                    appName: $(APP_NAME)
+                    resourceGroupName: $(RESOURCE_GROUP_NAME)
+                    imageName: "$(app.image.name)"
+                    imageTag: "$(app.image.tag)"
+
+      # Job 4: Post-Deployment Validation (Dev)
+      - job: Post_Deployment_Validation_Dev
+        displayName: "Run Post-Deployment Validations (Dev)"
+        dependsOn: Deploy_App_Dev # Runs after the app deployment job
+        container: csec-build-container
+        steps:
+          - checkout: none
+          - template: templates/app-validate.yml
+            parameters:
+              azureServiceConnection: $(CSEC_AZ_SERVICE_CONN)
+              appName: $(APP_NAME)
+              vaultName: $(KEY_VAULT_NAME)
+              resourceGroupName: $(RESOURCE_GROUP_NAME)
+
+  # ----------------------------
+  # Stage 3: CD - Deploy to Test
+  # ----------------------------
+  - stage: Deploy_Test
+    displayName: "Deploy to Test"
+    dependsOn: Deploy_Dev
+    variables:
+      - group: csec-app-test-vars # Stage-scoped variables for Test
+    # This stage is explicitly disabled. To enable, change to 'succeeded()'.
+    condition: false
+    jobs:
+      # Job 1: Deploy Database Schema to Test
+      - job: Deploy_DB_Test
+        displayName: "Deploy Database Schema to Test"
+        container: csec-build-container
+        steps:
+          - checkout: self # Checkout the repo to get backend.sql
+          - template: templates/db-deploy.yml
+            parameters:
+              displayName: "Deploy Backend Objects to Test DB"
+              azureServiceConnection: $(CSEC_AZ_SERVICE_CONN)
+              vaultName: $(KEY_VAULT_NAME)
+              dbHost: $(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-host" --query "value" -o tsv)
+              dbName: $(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-name" --query "value" -o tsv)
+              dbUser: "csb_app"
+              dbPasswordKey: "postgres-db-csb-app-user-password"
+              script: |
+                echo "Executing backend.sql on Test database..."
+                psql -f "$(app.sourceDirectory)/backend.sql"
+
+      # Job 2: Configure App Environment Variables (Test)
+      - job: Configure_Test_App
+        displayName: "Configure App Environment Variables (Test)"
+        dependsOn: Deploy_DB_Test
+        container: csec-build-container
+        steps:
+          - checkout: none
+          - task: AzureCLI@2
+            displayName: "Update App Service Settings"
+            inputs:
+              azureSubscription: $(CSEC_AZ_SERVICE_CONN)
+              scriptType: "bash"
+              scriptLocation: "inlineScript"
+              inlineScript: |
+                set -e
+                echo "Fetching password from Key Vault..."
+                POSTGRES_PASSWORD=$(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-csb-api-user-password" --query "value" -o tsv)
+
+                echo "Updating App Service environment variables..."
+                az webapp config appsettings set -g $(RESOURCE_GROUP_NAME) -n $(APP_NAME) --settings "POSTGRES_USER=${POSTGRES_USER}" "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
+
+      # Job 3: Deploy Application to Test
+      - deployment: Deploy_App_Test
+        displayName: "Deploy App to Test Environment"
+        dependsOn: Configure_Test_App # Ensure configuration job finishes first
+        container: csec-build-container
+        environment: "csec-test" # Targets an Azure DevOps Environment for tracking
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: none
+                - template: templates/app-deploy.yml
+                  parameters:
+                    azureServiceConnection: $(CSEC_AZ_SERVICE_CONN)
+                    appName: $(APP_NAME)
+                    resourceGroupName: $(RESOURCE_GROUP_NAME)
+                    imageName: "$(app.image.name)"
+                    imageTag: "$(app.image.tag)"
+
+      # Job 4: Post-Deployment Validation (Prod)
+      - job: Post_Deployment_Validation_Prod
+        displayName: "Run Post-Deployment Validations (Prod)"
+        dependsOn: Deploy_App_Prod
+        container: csec-build-container
+        steps:
+          - checkout: none
+          - template: templates/app-validate.yml
+            parameters:
+              azureServiceConnection: $(CSEC_AZ_SERVICE_CONN)
+              appName: $(APP_NAME)
+              vaultName: $(KEY_VAULT_NAME)
+              resourceGroupName: $(RESOURCE_GROUP_NAME)
+
+      # Job 4: Post-Deployment Validation (Test)
+      - job: Post_Deployment_Validation_Test
+        displayName: "Run Post-Deployment Validations (Test)"
+        dependsOn: Deploy_App_Test # Runs after the app deployment job
+        container: csec-build-container
+        steps:
+          - checkout: none
+          - template: templates/app-validate.yml
+            parameters:
+              azureServiceConnection: $(CSEC_AZ_SERVICE_CONN)
+              appName: $(APP_NAME)
+              vaultName: $(KEY_VAULT_NAME)
+              resourceGroupName: $(RESOURCE_GROUP_NAME)
+
+  # ----------------------------------
+  # Stage 4: CD - Deploy to Production
+  # ----------------------------------
+  - stage: Deploy_Prod
+    displayName: "Deploy to Prod"
+    dependsOn: Deploy_Test
+    variables:
+      - group: csec-app-prod-vars # Stage-scoped variables for Prod
+    # This stage runs only if the previous stages succeeded AND the build was
+    # triggered for a branch that starts with 'release/'. This provides a
+    # gate to ensure only release-ready code is deployed to Production.
+    condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/heads/release/'))
+    jobs:
+      # Job 1: Deploy Database Schema to Prod
+      - job: Deploy_DB_Prod
+        displayName: "Deploy Database Schema to Prod"
+        container: csec-build-container
+        steps:
+          - checkout: self
+          - template: templates/db-deploy.yml
+            parameters:
+              displayName: "Deploy Backend Objects to Prod DB"
+              azureServiceConnection: $(CSEC_AZ_SERVICE_CONN)
+              vaultName: $(KEY_VAULT_NAME)
+              dbHost: $(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-host" --query "value" -o tsv)
+              dbName: $(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-name" --query "value" -o tsv)
+              dbUser: "csb_app"
+              dbPasswordKey: "postgres-db-csb-app-user-password"
+              script: |
+                echo "Executing backend.sql on Prod database..."
+                psql -f "$(app.sourceDirectory)/backend.sql"
+
+      # Job 2: Configure App Environment Variables (Prod)
+      - job: Configure_Prod_App
+        displayName: "Configure App Environment Variables (Prod)"
+        dependsOn: Deploy_DB_Prod
+        container: csec-build-container
+        steps:
+          - checkout: none
+          - task: AzureCLI@2
+            displayName: "Update App Service Settings"
+            inputs:
+              azureSubscription: $(CSEC_AZ_SERVICE_CONN)
+              scriptType: "bash"
+              scriptLocation: "inlineScript"
+              inlineScript: |
+                set -e
+                POSTGRES_PASSWORD=$(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-csb-api-user-password" --query "value" -o tsv)
+                az webapp config appsettings set -g $(RESOURCE_GROUP_NAME) -n $(APP_NAME) --settings "POSTGRES_USER=${POSTGRES_USER}" "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
+
+      # Job 3: Deploy Application to Prod
+      - deployment: Deploy_App_Prod
+        displayName: "Deploy App to Prod Environment"
+        dependsOn: Configure_Prod_App
+        container: csec-build-container
+        environment: "csec-prod" # Targets the Prod environment with approval gates
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: none
+                - template: templates/app-deploy.yml
+                  parameters:
+                    azureServiceConnection: $(CSEC_AZ_SERVICE_CONN)
+                    appName: $(APP_NAME)
+                    resourceGroupName: $(RESOURCE_GROUP_NAME)
+                    imageName: "$(app.image.name)"
+                    imageTag: "$(app.image.tag)"
+
+  # --------------------------------------------
+  # Stage 5: Post-Deployment Notifications Stage
+  # --------------------------------------------
+  - stage: Post_Deployment_Notifications
+    displayName: "Post-Deployment Notifications"
+    dependsOn: Deploy_Prod
+    condition: false # Explicitly disable this stage
+    jobs:
+      - job: Send_Success_Notification
+        displayName: "Send Success Notification"
+        condition: succeeded()
+        container: csec-build-container
+        steps:
+          - checkout: none
+          - script: |
+              echo "##[section]Pipeline Succeeded"
+              echo "Application deployment completed successfully."
+              echo "Sending success notification..."
+              echo "This is a placeholder."
+            displayName: "Send Success Email (Placeholder)"
+
+      - job: Send_Failure_Notification
+        displayName: "Send Failure Notification"
+        condition: failed()
+        container: csec-build-container
+        steps:
+          - checkout: none
+          - script: |
+              echo "##[warning]Pipeline Failed"
+              echo "One or more deployment stages failed. Please review the logs."
+              echo "Sending failure notification..."
+              echo "This is a placeholder."
+            displayName: "Send Failure Email (Placeholder)"

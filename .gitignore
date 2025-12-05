@@ -1,0 +1,15 @@
+setup*
+plan*
+venv
+.terraform*
+terraform.tfstate*
+_*.tf
+*.zip
+*.DS*
+_docs
+_build*
+_backend*
+_local*.sh
+_local*.yml
+docker-compose.yml
+*.swp

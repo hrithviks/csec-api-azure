@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Service Health Status</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    <div class="container">
+        <div class="header-container">
+            <h1>cSecBridge API Service Health Status</h1>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Service</th>
+                    <th>Status</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody id="status-table-body">
+                {% for service, (status, details) in services.items() %}
+                <tr>
+                    <td>{{ service }}</td>
+                    <td>
+                        <span class="status {{ 'status-ok' if status == 'OK' else 'status-error' }}">
+                            {{ status }}
+                        </span>
+                    </td>
+                    <td>{{ details }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <div class="footer" id="footer-time" data-timestamp="{{ timestamp.isoformat() if timestamp else '' }}">
+            Last checked: {{ last_checked }}
+        </div>
+        <button id="check-status-btn">Check Status Now</button>
+    </div>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+
+</html>

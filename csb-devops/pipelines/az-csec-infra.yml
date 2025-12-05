@@ -1,0 +1,360 @@
+# /az-csec-infra.yml
+#
+# -----------------------------------------------------------------------------
+# Pipeline: csec-API-Service Infrastructure (Terraform)
+#
+# Description: This pipeline automates the deployment of the csec-api-service
+#              infrastructure using Terraform. It orchestrates deployments
+#              across multiple environments (Dev, Test, Prod) by leveraging a
+#              reusable deployment template.
+#
+# Trigger Configuration:
+# This pipeline is configured for manual execution. For continuous deployment,
+# a branch trigger with path filters for 'csb-api-iac/terraform/' can be
+# implemented.
+# -----------------------------------------------------------------------------
+
+trigger: none
+
+# Defines the container resource used for pipeline jobs. The jobs will run
+# inside this container, which is pre-configured with Terraform.
+resources:
+  containers:
+    - container: csec-build-container
+      image: $(config.buildContainerImage)
+      endpoint: "csec-az-github-registry"
+
+# Specifies the self-hosted agent pool for job execution.
+pool:
+  name: "csec-az-devops-agent-pool"
+
+# Defines pipeline-level variables for configuration and parameterization.
+# A structured naming convention (e.g., config.*, dev.*) is used for clarity.
+variables:
+  # Links to the 'csec-terraform-secrets' variable group to securely access
+  # secrets like Terraform credentials.
+  - group: csec-terraform-secrets
+
+  # General Configuration
+  - name: config.terraformWorkingDirectory
+    value: "$(System.DefaultWorkingDirectory)/csb-api-iac/terraform"
+  - name: config.infraWorkingDirectory
+    value: "$(System.DefaultWorkingDirectory)/csb-api-iac"
+  - name: config.buildContainerImage
+    value: "ghcr.io/hrithviks/csec-build-container:latest"
+  - name: config.azureServiceConnection
+    value: "csec-az-devops-main"
+
+stages:
+  # -------------------------------------------------------------------------- #
+  # Validation Stage:                                                          #
+  # Performs static code analysis to ensure code quality and security before   #
+  # any deployment attempts. This stage runs first and fails the pipeline if   #
+  # any issues are found.                                                      #
+  # -------------------------------------------------------------------------- #
+  - stage: Validate
+    displayName: "Validate Terraform Code"
+    jobs:
+      # Job 1: Code Quality (Linting)
+      # This job focuses on code style, formatting, and adherence to Terraform
+      # best practices using built-in formatting and the TFLint tool.
+      - job: CodeQuality
+        displayName: "Run Code Quality Checks (Linting)"
+        container: csec-build-container
+        steps:
+          # Step 1.1: Checkout source code to make it available to the agent.
+          - checkout: self
+
+          # Step 1.3: Initialize Terraform.
+          # This downloads the required provider plugins, which are necessary
+          # for the linters to understand provider-specific resources.
+          # '-backend=false' prevents it from trying to connect to a state backend.
+          - script: |
+              terraform init -backend=false
+            displayName: "Terraform Init"
+            workingDirectory: $(config.terraformWorkingDirectory)
+
+          # Step 1.4: Check HCL formatting.
+          # Ensures all Terraform files adhere to the canonical format,
+          # promoting consistency and readability. '-check' fails if not formatted.
+          - script: |
+              terraform fmt -check -recursive
+            displayName: "Check Terraform Formatting (fmt)"
+            workingDirectory: $(config.terraformWorkingDirectory)
+
+          # Step 1.5: Run TFLint.
+          # Performs a deeper static analysis to find potential errors,
+          # deprecated syntax, and enforce best practices.
+          - script: |
+              tflint --init
+              tflint --recursive
+            displayName: "Lint Terraform Code (tflint)"
+            workingDirectory: $(config.terraformWorkingDirectory)
+
+      # Job 2: Security Scanning (SAST)
+      # This job is dedicated to Static Application Security Testing (SAST)
+      # for Infrastructure as Code, using tfsec to find security vulnerabilities.
+      - job: SecurityScan
+        displayName: "Run Security Scans (SAST)"
+        container: csec-build-container
+        steps:
+          # Step 2.1: Checkout source code.
+          - checkout: self
+
+          # Step 2.3: Initialize Terraform.
+          # Required for tfsec to have the full context of the provider schemas
+          # when scanning for security issues.
+          - script: |
+              terraform init -backend=false
+            displayName: "Terraform Init"
+            workingDirectory: $(config.terraformWorkingDirectory)
+
+          # Step 2.4: Run tfsec.
+          # Scans the Terraform code for security misconfigurations and policy
+          # violations based on industry best practices.
+          - script: |
+              tfsec .
+            displayName: "Scan for Security Issues (tfsec)"
+            workingDirectory: $(config.terraformWorkingDirectory)
+
+  # ---------------------------------------------------------------------- #
+  # Development Deployment Stage:                                          #
+  # Deploys the infrastructure to the Development environment. This is the #
+  # first deployment target, used for initial validation and testing.      #
+  # ---------------------------------------------------------------------- #
+  - stage: Deploy_Dev
+    displayName: "Deploy to Dev"
+    # This stage will only run if the 'Validate' stage completes successfully.
+    variables:
+      - group: csec-infra-dev-vars # Stage-scoped variables for Dev
+    dependsOn: Validate # Ensure validation passes before deploying
+    jobs:
+      # This job targets the 'csec-dev' Azure DevOps Environment, which enables
+      # deployment tracking and history for the Dev environment.
+      - deployment: Terraform_Dev
+        displayName: "Terraform Deploy Infrastructure (Dev)"
+        container: csec-build-container
+        environment: "csec-dev"
+        strategy:
+          # The runOnce strategy executes the deployment steps a single time.
+          runOnce:
+            deploy:
+              steps:
+                # Step 3.1: Checkout source code to access the Terraform files.
+                - checkout: self
+
+                # Step 3.2: Use the reusable template for Terraform deployment.
+                # This abstracts the init/plan/apply logic and is parameterized
+                # with environment-specific values for the Dev environment.
+                - template: templates/terraform.yml
+                  parameters:
+                    environmentName: "Dev"
+                    environmentDisplayName: "Development"
+                    tfVarFile: $(TF_VAR_FILE)
+                    tfStateFileKey: $(TF_STATE_FILE_KEY)
+                    vaultName: $(KEY_VAULT_NAME)
+                    azureServiceConnection: $(config.azureServiceConnection)
+                    terraformWorkingDirectory: $(config.terraformWorkingDirectory)
+
+  # -------------------------------------------------------------------------- #
+  # Development Configuration Stage:                                           #
+  # This stage runs after the Dev infrastructure is deployed. It consists of   #
+  # two jobs: the first initializes the database schema by running init.sql,   #
+  # and the second sets the passwords for the application-specific users by    #
+  # reading the credentials securely from Azure Key Vault.                     #
+  # -------------------------------------------------------------------------- #
+  - stage: Configure_Dev
+    displayName: "Configure Dev Environment"
+    dependsOn: Deploy_Dev
+    variables:
+      - group: csec-infra-dev-vars # Stage-scoped variables for Dev
+    condition: succeeded()
+    jobs:
+      # Job 1: Initialize the database schema by running the init.sql script.
+      - job: Initialize_DB_Schema
+        displayName: "Initialize Database Schema (Dev)"
+        container: csec-build-container
+        steps:
+          - checkout: self
+          - template: templates/db-deploy.yml
+            parameters:
+              displayName: "Run init.sql Script"
+              azureServiceConnection: $(config.azureServiceConnection)
+              dbHost: $(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-host" --query "value" -o tsv)
+              dbName: $(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-name" --query "value" -o tsv)
+              dbUser: $(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-admin" --query "value" -o tsv)
+              vaultName: $(KEY_VAULT_NAME)
+              dbPasswordKey: "postgres-db-admin-password"
+              script: | # This script is injected into the template
+                echo "Executing init.sql script..."
+                DB_NAME=$(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-name" --query "value" -o tsv)
+                psql -v db_name="\"$DB_NAME\"" -f $(config.infraWorkingDirectory)/postgres/init.sql
+                echo "Database initialization complete."
+
+      # Job 2: Set the passwords for the application-specific database users.
+      - job: Set_DB_Passwords
+        displayName: "Set Database User Passwords (Dev)"
+        dependsOn: Initialize_DB_Schema
+        container: csec-build-container
+        steps:
+          - checkout: self
+          - template: templates/db-deploy.yml
+            parameters:
+              displayName: "Update User Passwords"
+              azureServiceConnection: $(config.azureServiceConnection)
+              dbHost: $(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-host" --query "value" -o tsv)
+              dbName: $(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-name" --query "value" -o tsv)
+              dbUser: $(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-admin" --query "value" -o tsv)
+              vaultName: $(KEY_VAULT_NAME)
+              dbPasswordKey: "postgres-db-admin-password"
+              # This script is injected into the template. It securely sets passwords.
+              script: |
+                # Get user passwords for ALTER statements
+                DB_APP_USER_PSWD=$(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-csb-app-user-password" --query "value" -o tsv)
+                DB_API_USER_PSWD=$(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-csb-api-user-password" --query "value" -o tsv)
+                DB_AWS_USER_PSWD=$(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-csb-aws-user-password" --query "value" -o tsv)
+                DB_AZURE_USER_PSWD=$(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-csb-azure-user-password" --query "value" -o tsv)
+
+                echo "Securely updating user passwords in a single transaction..."
+
+                # The -v flags pass the passwords as psql variables (:var), which avoids shell
+                # interpolation and keeps the passwords from being exposed in logs.
+                psql \
+                  -v app_pswd="'${DB_APP_USER_PSWD}'" \
+                  -v api_pswd="'${DB_API_USER_PSWD}'" \
+                  -v aws_pswd="'${DB_AWS_USER_PSWD}'" \
+                  -v azure_pswd="'${DB_AZURE_USER_PSWD}'" <<-EOF
+                    ALTER USER csb_app WITH PASSWORD :app_pswd;
+                    ALTER USER csb_api_user WITH PASSWORD :api_pswd;
+                    ALTER USER csb_aws_user WITH PASSWORD :aws_pswd;
+                    ALTER USER csb_azure_user WITH PASSWORD :azure_pswd;
+                EOF
+
+                echo "Database user passwords updated."
+
+  # -------------------------------------------------------------------------- #
+  # Test Deployment Stage:                                                     #
+  # Deploys the infrastructure to the Test environment for QA and integration  #
+  # testing.                                                                   #
+  # -------------------------------------------------------------------------- #
+  - stage: Deploy_Test
+    displayName: "Deploy to Test"
+    # This stage will only run after the 'Deploy_Dev' stage completes.
+    variables:
+      - group: csec-infra-test-vars # Stage-scoped variables for Test
+    dependsOn: Deploy_Dev # Set dependency on DEV stage
+    # This stage is explicitly disabled. To enable it, change this to 'true'
+    # or a condition such as 'succeeded()'.
+    condition: false # Explicitly disable this stage
+    jobs:
+      # This job targets the 'csec-test' Azure DevOps Environment, enabling
+      # deployment tracking and history for the Test environment.
+      - deployment: Terraform_Test
+        displayName: "Terraform Plan & Apply (Test)"
+        container: csec-build-container
+        environment: "csec-test"
+        strategy:
+          # The runOnce strategy executes the deployment steps a single time.
+          runOnce:
+            deploy:
+              steps:
+                # Step 4.1: Checkout source code.
+                - checkout: self
+
+                # Step 4.2: Call the reusable Terraform template with parameters
+                # specific to the Test environment.
+                - template: templates/terraform.yml
+                  parameters:
+                    environmentName: "Test"
+                    environmentDisplayName: "Test"
+                    tfVarFile: $(TF_VAR_FILE)
+                    tfStateFileKey: $(TF_STATE_FILE_KEY)
+                    vaultName: $(KEY_VAULT_NAME)
+                    azureServiceConnection: $(config.azureServiceConnection)
+                    terraformWorkingDirectory: $(config.terraformWorkingDirectory)
+
+  # -------------------------------------------------------------------------- #
+  # Production Deployment Stage:                                               #
+  # Deploys the infrastructure to the Production environment. This is the      #
+  # final and most critical stage.                                             #
+  # -------------------------------------------------------------------------- #
+  - stage: Deploy_Prod
+    displayName: "Deploy to Prod"
+    # This stage will only run after the 'Deploy_Test' stage completes.
+    variables:
+      - group: csec-infra-prod-vars # Stage-scoped variables for Prod
+    dependsOn: Deploy_Test # Set dependency on TEST stage
+    # This stage runs only if the previous stages succeeded AND the build was
+    # triggered for a branch that starts with 'release/'. This provides a
+    # gate to ensure only release-ready code is deployed to Production.
+    condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/heads/release/'))
+    jobs:
+      # This job targets the 'csec-prod' Azure DevOps Environment.
+      # For production, this environment should be configured in the Azure
+      # DevOps UI with manual approval gates to prevent unauthorized deployments.
+      - deployment: Terraform_Prod
+        displayName: "Terraform Plan & Apply (Prod)"
+        container: csec-build-container
+        environment: "csec-prod"
+        strategy:
+          # The runOnce strategy executes the deployment steps a single time.
+          runOnce:
+            deploy:
+              steps:
+                # Step 5.1: Checkout source code to access the Terraform files.
+                - checkout: self
+                # Step 5.2: Use the reusable template for Terraform deployment.
+                # This abstracts the init/plan/apply logic and is parameterized
+                # with environment-specific values for the Production environment.
+                - template: templates/terraform.yml
+                  parameters:
+                    environmentName: "Prod"
+                    environmentDisplayName: "Production"
+                    tfVarFile: $(TF_VAR_FILE)
+                    tfStateFileKey: $(TF_STATE_FILE_KEY)
+                    vaultName: $(KEY_VAULT_NAME)
+                    azureServiceConnection: $(config.azureServiceConnection)
+                    terraformWorkingDirectory: $(config.terraformWorkingDirectory)
+
+  # -------------------------------------------------------------------------- #
+  # Post-Deployment Notifications Stage:                                       #
+  # This final stage runs after all other stages have completed. It is         #
+  # responsible for sending notifications about the pipeline's final status.   #
+  # -------------------------------------------------------------------------- #
+  - stage: Post_Deployment_Notifications
+    displayName: "Post-Deployment Notifications"
+    # This stage depends on the final deployment stage in the chain.
+    dependsOn: Deploy_Prod
+    # This stage is explicitly disabled. To enable, change to 'true' or 'succeeded()'.
+    # 'always()' ensures this stage runs even if previous stages fail.
+    condition: false
+    jobs:
+      # Job 1: Send a success notification.
+      # This job runs only if all preceding stages in the pipeline succeeded.
+      - job: Send_Success_Notification
+        displayName: "Send Success Notification"
+        condition: succeeded()
+        container: csec-build-container
+        steps:
+          - checkout: none
+          - script: |
+              echo "##[section]Pipeline Succeeded"
+              echo "All deployment stages completed successfully."
+              echo "Sending success notification to distribution-list@example.com..."
+              echo "This is a placeholder."
+            displayName: "Send Success Email (Placeholder)"
+
+      # Job 2: Send a failure notification.
+      # This job runs if any of the preceding stages failed.
+      - job: Send_Failure_Notification
+        displayName: "Send Failure Notification"
+        condition: failed()
+        container: csec-build-container
+        steps:
+          - checkout: none
+          - script: |
+              echo "##[warning]Pipeline Failed"
+              echo "One or more deployment stages failed. Please review the logs."
+              echo "Sending failure notification to distribution-list@example.com..."
+              echo "This is a placeholder."
+            displayName: "Send Failure Email (Placeholder)"

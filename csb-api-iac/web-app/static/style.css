@@ -1,0 +1,121 @@
+body {
+    font-family: "Tahoma", "VerdanaSegoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    margin: 40px;
+    background-color: #f4f7f6;
+    color: #333;
+}
+
+.container {
+    max-width: 700px;
+    margin: auto;
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+h1 {
+    color: #005a9c;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+}
+
+th,
+td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+
+th {
+    background-color: #e9ecef;
+}
+
+.status {
+    font-weight: bold;
+    padding: 5px 10px;
+    border-radius: 15px;
+    color: white;
+}
+
+.status-ok {
+    background-color: #28a745;
+}
+
+.status-error {
+    background-color: #dc3545;
+}
+
+.footer {
+    margin-top: 20px;
+    font-size: 0.9em;
+    color: #888;
+}
+
+.header-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+button {
+    display: block;
+    margin: 20px 0 0 0;
+    padding: 10px 15px;
+    font-size: 1em;
+    color: white;
+    background-color: #007bff;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+button:not(:disabled):hover {
+    background-color: #0056b3;
+}
+
+button:disabled {
+    background-color: #5a8ec7;
+    cursor: not-allowed;
+}
+
+/* Define the entrance animation */
+@keyframes fadeInDown {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Apply the animation to each main element with a delay for a staggered effect */
+.header-container,
+.container table,
+.footer,
+.container button {
+    animation: fadeInDown 0.8s ease-out forwards;
+    opacity: 0;
+    /* Start hidden */
+}
+
+.container table {
+    animation-delay: 0.5s;
+}
+
+.footer {
+    animation-delay: 0.5s;
+}
+
+.container button {
+    animation-delay: 0.5s;
+}

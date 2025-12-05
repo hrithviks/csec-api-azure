@@ -1,0 +1,204 @@
+# /templates/terraform.yml
+#
+# Description:
+# This is a reusable Azure DevOps template for deploying Terraform infrastructure.
+# It encapsulates the common sequence of installing Terraform, initializing the
+# backend, creating an execution plan, and applying the plan.
+#
+# Parameters:
+# - environmentName: A short name for the environment (e.g., 'Dev', 'Test', 'Prod').
+# - environmentDisplayName: The full display name for the environment (e.g., 'Development').
+# - tfVarFile: The name of the Terraform variables file to use for this environment (e.g., 'csb_dev.tfvars').
+# - tfStateFileKey: The name of the state file in the Azure Blob Storage container (e.g., 'dev.terraform.tfstate').
+# - azureServiceConnection: The name of the Azure DevOps service connection to use for authentication.
+# - terraformWorkingDirectory: The path to the directory containing the Terraform configuration files.
+
+parameters:
+  - name: environmentName
+    type: string
+  - name: environmentDisplayName
+    type: string
+  - name: tfVarFile
+    type: string
+  - name: tfStateFileKey
+    type: string
+  - name: azureServiceConnection
+    type: string
+  - name: terraformWorkingDirectory
+    type: string
+  - name: vaultName
+    type: string
+
+steps:
+
+  # Note: Performance and Maintainability
+  #
+  # 1. Provider Caching (Currently Disabled):
+  #    Caching Terraform provider plugins between runs improves pipeline
+  #    performance by preventing `terraform init` from re-downloading them on
+  #    every execution. This can be achieved using the `Cache@2` task but has
+  #    been omitted here due to project-level permission constraints.
+  #
+  # 2. Separate Tasks for Clarity:
+  #    This template uses separate tasks for `init`, `plan`, and `apply`.
+  #    This approach provides clear, distinct steps in the pipeline UI, making
+  #    it easier to diagnose failures at a specific stage of the process.
+  
+  # Step 1: Terraform Init
+  # Initializes the Terraform working directory, downloading provider plugins
+  # and configuring the backend state storage in Azure Blob Storage.
+  - task: AzureCLI@2
+    displayName: 'Terraform Init (${{ parameters.environmentName }})'
+    inputs:
+      azureSubscription: ${{ parameters.azureServiceConnection }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      workingDirectory: ${{ parameters.terraformWorkingDirectory }}
+      addSpnToEnvironment: true
+      inlineScript: |
+        set -e # exit on error
+        # Export ARM variables for Terraform to authenticate with Azure
+        export ARM_CLIENT_ID=$servicePrincipalId
+        export ARM_CLIENT_SECRET=$servicePrincipalKey
+        export ARM_TENANT_ID=$tenantId
+        export ARM_SUBSCRIPTION_ID="$(az account show --query="id" -o tsv)"
+
+        terraform init -reconfigure \
+          -backend-config="key=${{ parameters.tfStateFileKey }}"
+    env:
+      # Map secrets from the variable group to environment variables for Terraform
+      TF_VAR_csec_api_auth_token: $(TF_VAR_csec_api_auth_token)
+      TF_VAR_db_redis_image_registry_password: $(TF_VAR_db_redis_image_registry_password)
+      TF_VAR_app_ghcr_pswd: $(TF_VAR_app_ghcr_pswd)
+      TF_VAR_app_ghcr_user: $(TF_VAR_app_ghcr_user)
+
+  # Step 2: Terraform Plan
+  # Creates an execution plan and saves it to an artifact. This shows what
+  # actions Terraform will perform to reach the desired state.
+  - task: AzureCLI@2
+    displayName: 'Terraform Plan (${{ parameters.environmentName }})'
+    inputs:
+      azureSubscription: ${{ parameters.azureServiceConnection }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      workingDirectory: ${{ parameters.terraformWorkingDirectory }}
+      addSpnToEnvironment: true
+      inlineScript: |
+        set -e # exit on error
+        # Export ARM variables for Terraform to authenticate with Azure
+        export ARM_CLIENT_ID=$servicePrincipalId
+        export ARM_CLIENT_SECRET=$servicePrincipalKey
+        export ARM_TENANT_ID=$tenantId
+        export ARM_SUBSCRIPTION_ID="$(az account show --query="id" -o tsv)"
+
+        terraform plan -var-file="${{ parameters.tfVarFile }}" -out=tfplan
+    env:
+      TF_VAR_csec_api_auth_token: $(TF_VAR_csec_api_auth_token)
+      TF_VAR_db_redis_image_registry_password: $(TF_VAR_db_redis_image_registry_password)
+      TF_VAR_app_ghcr_pswd: $(TF_VAR_app_ghcr_pswd)
+      TF_VAR_app_ghcr_user: $(TF_VAR_app_ghcr_user)
+      TF_VAR_app_image_name: $(TF_VAR_app_image_name)
+
+  # Step 3: Terraform Apply
+  # Executes the plan created in the previous step to create, update, or
+  # delete infrastructure.
+  - task: AzureCLI@2
+    displayName: 'Terraform Apply (${{ parameters.environmentName }})'
+    inputs:
+      azureSubscription: ${{ parameters.azureServiceConnection }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      workingDirectory: ${{ parameters.terraformWorkingDirectory }}
+      addSpnToEnvironment: true
+      inlineScript: |
+        set -e # exit on error
+        # Export ARM variables for Terraform to authenticate with Azure
+        export ARM_CLIENT_ID=$servicePrincipalId
+        export ARM_CLIENT_SECRET=$servicePrincipalKey
+        export ARM_TENANT_ID=$tenantId
+        export ARM_SUBSCRIPTION_ID="$(az account show --query="id" -o tsv)"
+
+        terraform apply -auto-approve tfplan
+
+  # Step 4: Capture Terraform Outputs
+  # After a successful apply, this task connects to the Terraform state and
+  # reads all output values. It then uses a 'jq' command to parse the JSON
+  # output and dynamically create secret pipeline variables for each one.
+  - task: AzureCLI@2
+    name: TerraformOutput # Give the task a name to reference its variables
+    displayName: 'Capture Terraform Outputs (${{ parameters.environmentName }})'
+    inputs:
+      azureSubscription: ${{ parameters.azureServiceConnection }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      workingDirectory: ${{ parameters.terraformWorkingDirectory }}
+      addSpnToEnvironment: true
+      inlineScript: |
+        set -e # exit on error
+        echo "##[group]Authenticating and Initializing Terraform for Output Capture"
+        # Export ARM variables for Terraform to authenticate with Azure
+        export ARM_CLIENT_ID=$servicePrincipalId
+        export ARM_CLIENT_SECRET=$servicePrincipalKey
+        export ARM_TENANT_ID=$tenantId
+        export ARM_SUBSCRIPTION_ID="$(az account show --query="id" -o tsv)"
+        
+        # A re-initialization is required to configure the backend before reading outputs.
+        terraform init -reconfigure \
+          -backend-config="key=${{ parameters.tfStateFileKey }}"
+        echo "##[endgroup]"
+
+        echo "##[group]Storing Terraform Outputs in Azure Key Vault"
+        # For each expected output from Terraform, this block calls 'terraform output -raw'
+        # to get the value and then uses 'az keyvault secret set' to store it.
+        # This makes the outputs securely available to subsequent stages or other services.
+        
+        # Set DB Host
+        az keyvault secret set --vault-name "${{ parameters.vaultName }}" \
+          --name "postgres-db-host" \
+          --value "$(terraform output -raw postgres_db_host)" \
+          --query "{name: name, id: id, attributes: attributes}"
+
+        # Set DB Name
+        az keyvault secret set --vault-name "${{ parameters.vaultName }}" \
+          --name "postgres-db-name" \
+          --value "$(terraform output -raw postgres_db_name)" \
+          --query "{name: name, id: id, attributes: attributes}"
+        
+        # Set DB Admin Username
+        az keyvault secret set --vault-name "${{ parameters.vaultName }}" \
+          --name "postgres-db-admin" \
+          --value "$(terraform output -raw postgres_db_admin)" \
+          --query "{name: name, id: id, attributes: attributes}"
+
+        # Set DB Admin Password
+        az keyvault secret set --vault-name "${{ parameters.vaultName }}" \
+          --name "postgres-db-admin-password" \
+          --value "$(terraform output -raw postgres_db_admin_password)" \
+          --query "{name: name, id: id, attributes: attributes}"
+
+        # Set App User Password
+        az keyvault secret set --vault-name "${{ parameters.vaultName }}" \
+          --name "postgres-db-csb-app-user-password" \
+          --value "$(terraform output -raw postgres_db_csb_app_user_password)" \
+          --query "{name: name, id: id, attributes: attributes}"
+        
+        # Set API User Password
+        az keyvault secret set --vault-name "${{ parameters.vaultName }}" \
+          --name "postgres-db-csb-api-user-password" \
+          --value "$(terraform output -raw postgres_db_csb_api_user_password)" \
+          --query "{name: name, id: id, attributes: attributes}"
+
+        # Set AWS User Password
+        az keyvault secret set --vault-name "${{ parameters.vaultName }}" \
+          --name "postgres-db-csb-aws-user-password" \
+          --value "$(terraform output -raw postgres_db_csb_aws_user_password)" \
+          --query "{name: name, id: id, attributes: attributes}"
+
+        # Set Azure User Password
+        az keyvault secret set --vault-name "${{ parameters.vaultName }}" \
+          --name "postgres-db-csb-azure-user-password" \
+          --value "$(terraform output -raw postgres_db_csb_azure_user_password)" \
+          --query "{name: name, id: id, attributes: attributes}"
+
+        echo "Terraform outputs have been securely stored in Key Vault '${{ parameters.vaultName }}'."
+        echo "##[endgroup]"

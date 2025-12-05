@@ -1,0 +1,34 @@
+# /templates/app-deploy.yml
+#
+# Description:
+# This template contains the reusable steps for deploying a containerized
+# application to an Azure App Service. It is designed to be called from the
+# main application CI/CD pipeline.
+#
+# Parameters:
+# - azureServiceConnection: The name of the Azure Resource Manager service
+#   connection to use for authentication.
+# - appName: The name of the target Azure App Service.
+# - imageName: The full name of the container image to deploy (e.g., ghcr.io/user/repo).
+# - imageTag: The specific tag of the image to deploy.
+
+parameters:
+  - name: azureServiceConnection
+    type: string
+  - name: appName
+    type: string
+  - name: imageName
+    type: string
+  - name: imageTag
+    type: string
+  - name: resourceGroupName
+    type: string
+
+steps:
+  - task: AzureWebAppContainer@1
+    displayName: "Deploy to Azure App Service"
+    inputs:
+      azureSubscription: "${{ parameters.azureServiceConnection }}"
+      appName: "${{ parameters.appName }}"
+      imageName: "${{ parameters.imageName }}:${{ parameters.imageTag }}"
+      resourceGroupName: "${{ parameters.resourceGroupName }}"

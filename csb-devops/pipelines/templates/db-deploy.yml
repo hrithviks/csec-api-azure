@@ -1,0 +1,58 @@
+# /templates/db-deploy.yml
+#
+# Description:
+# This is a reusable Azure DevOps step template for executing commands against
+# a PostgreSQL database. It handles the boilerplate of fetching the admin
+# password from Key Vault and setting the necessary PSQL environment variables
+# (PGHOST, PGUSER, etc.) before running a provided script.
+#
+# Parameters:
+# - azureServiceConnection: The name of the Azure DevOps service connection.
+# - displayName: The display name for the task in the pipeline UI.
+# - script: The bash script content to be executed after the environment is prepared.
+# - dbHost: The hostname or IP address of the PostgreSQL server.
+# - dbPort: The port number for the PostgreSQL server.
+# - dbUser: The admin username for connecting to the database.
+# - dbName: The name of the target database.
+# - vaultName: The name of the Azure Key Vault to fetch the password from.
+# - dbPasswordKey: The name of the secret in Key Vault that holds the admin password.
+
+parameters:
+  - name: azureServiceConnection
+    type: string
+  - name: displayName
+    type: string
+  - name: script # The script content will be passed here
+    type: string
+  - name: dbHost
+    type: string
+  - name: dbPort
+    type: number
+    default: 5432
+  - name: dbUser
+    type: string
+  - name: dbPasswordKey
+    type: string
+  - name: dbName
+    type: string
+  - name: vaultName
+    type: string
+
+steps:
+  - task: AzureCLI@2
+    displayName: ${{ parameters.displayName }}
+    inputs:
+      azureSubscription: ${{ parameters.azureServiceConnection }}
+      scriptType: "bash"
+      scriptLocation: "inlineScript"
+      inlineScript: |
+        set -e
+        set -u
+        echo "Preparing database connection environment..."
+        export PGHOST="${{ parameters.dbHost }}"
+        export PGPORT="${{ parameters.dbPort }}"
+        export PGDATABASE="${{ parameters.dbName }}"
+        export PGUSER="${{ parameters.dbUser }}"
+        export PGPASSWORD=$(az keyvault secret show --vault-name "${{ parameters.vaultName }}" --name "${{ parameters.dbPasswordKey }}" --query "value" -o tsv)
+
+        ${{ parameters.script }}
