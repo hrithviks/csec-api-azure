@@ -19,6 +19,9 @@
 *       to have been created by the infrastructure provisioning automation.
 */ ----------------------------------------------------------------------------
 
+-- Start transaction to ensure atomic deployment
+BEGIN;
+
 -- Create a custom ENUM type for request status idempotently.
 do $$
 begin
@@ -127,3 +130,5 @@ create policy csb_api_user_select_policy on csb_app.csb_requests for select to c
 -- Worker policies: These roles can only see and modify rows where the 'cloud_provider' column matches their designated provider.
 create policy csb_aws_worker_policy on csb_app.csb_requests for all to csb_aws_user using (cloud_provider = 'aws') with check (cloud_provider = 'aws');
 create policy csb_azure_worker_policy on csb_app.csb_requests for all to csb_azure_user using (cloud_provider = 'azure') with check (cloud_provider = 'azure');
+
+COMMIT;
