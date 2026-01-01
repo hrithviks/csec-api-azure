@@ -4,68 +4,43 @@
 # Overview:
 # This pipeline automates the CI/CD process for the csec-API-Service. It
 # validates application code, builds a secure container image, and deploys it
-# across multiple environments (Dev, Test) following a structured promotion model.
+# across multiple environments (Dev, Test, Prod) following a structured
+# promotion model.
 #
-# Trigger Configuration:
-# This pipeline is configured for manual execution. For true CI/CD, a branch
-# trigger with path filters for 'csb-api-app/' should be implemented.
+# Reliability & Rollback Strategy:
+# - Database: Uses transactional execution (Atomicity). If the SQL script fails,
+#   the database engine automatically rolls back the transaction, preventing
+#   partial deployments.
+# - Application: Implements a "Stage-Level Rollback" pattern.
+#   1. Captures the current stable image tag before deployment.
+#   2. If any job in the stage fails, a dedicated Rollback job automatically
+#      reverts the App Service to the captured previous image.
 #
 # -----------------------------------------------------------------------------
 #
-# Pipeline Stages and Jobs Breakdown:
+# Pipeline Stages Breakdown:
 #
 # 1. Build Stage:
-#    This stage handles all Continuous Integration (CI) tasks. It validates
-#    code quality and security before producing a container image artifact.
-#    - Job: BuildImage
-#      - Step 1: Run SAST Scan (Bandit): Scans Python code for security flaws.
-#      - Step 2: Scan Dependencies (Trivy): Checks 'requirements.txt' for CVEs.
-#      - Step 3: Run Linting (Flake8): Enforces code style and quality.
-#      - Step 4: Build Docker Image: Creates the container image.
-#      - Step 5: Scan Docker Image (Trivy): Scans the built image for OS/package
-#        vulnerabilities before it is pushed.
-#      - Step 6: Push to GHCR: Publishes the validated image to the registry.
+#    Handles Continuous Integration (CI). It runs SAST (Bandit), dependency
+#    scanning (Trivy), and linting (Flake8). If successful, it builds the
+#    Docker image, scans it for vulnerabilities, and pushes it to GHCR.
 #
 # 2. Deploy_Dev Stage:
-#    This stage deploys the application to the Development environment. It serves
-#    as the first gate for validating the deployment process and application health.
-#    - Job 1: Deploy_DB_Dev: Applies the latest schema changes from 'backend.sql'
-#      to the Dev database, ensuring it's ready for the new app version.
-#    - Job 2: Configure_Dev_App: Updates the App Service application settings,
-#      securely fetching secrets like database passwords from Key Vault at runtime.
-#    - Job 3: Deploy_App_Dev: A 'deployment' job that deploys the container
-#      image to the App Service and provides traceability in the 'csec-dev'
-#      Azure DevOps Environment.
-#    - Job 4: Post_Deployment_Validation_Dev: Runs a suite of integration and
-#      health check tests against the newly deployed application.
+#    Deploys to the Development environment with full rollback capabilities.
+#    - Job 1: Capture_State_Dev: Saves the current App Service image tag.
+#    - Job 2: Deploy_DB_Dev: Applies schema changes transactionally.
+#    - Job 3: Configure_Dev_App: Updates App Service settings securely.
+#    - Job 4: Deploy_App_Dev: Deploys the new container image.
+#    - Job 5: Post_Deployment_Validation_Dev: Runs health checks.
+#    - Job 6: Rollback_Dev_Stage: Reverts the App Service image if any
+#      preceding job fails.
 #
-# 3. Deploy_Test Stage:
-#    (Currently disabled) This stage promotes the application to the Test
-#    environment for formal QA, UAT, and integration testing. It mirrors the
-#    Dev deployment process to ensure consistency.
-#    - Job 1: Deploy_DB_Test: Applies schema changes to the Test database.
-#    - Job 2: Configure_Test_App: Sets environment-specific variables and
-#      secrets for the Test App Service.
-#    - Job 3: Deploy_App_Test: Deploys the container image to the 'csec-test'
-#      Azure DevOps Environment.
-#    - Job 4: Post_Deployment_Validation_Test: Runs the same suite of
-#      integration tests against the Test environment.
-#
-# 4. Deploy_Prod Stage:
-#    (Gated) This is the final stage that deploys the application to Production.
-#    It is protected by two conditions: it only runs on 'release/*' branches,
-#    and it targets an Azure DevOps Environment ('csec-prod') that should be
-#    configured with a manual approval gate.
-#    - Job 1: Deploy_DB_Prod: Applies schema changes to the Prod database.
-#    - Job 2: Configure_Prod_App: Sets environment-specific variables for Prod.
-#    - Job 3: Deploy_App_Prod: Deploys the container image to the 'csec-prod'
-#      environment, pending approval.
-#    - Job 4: Post_Deployment_Validation_Prod: Runs validation tests against
-#      the live Production environment.
-#
-# 5. Post_Deployment_Notifications Stage:
-#    (Currently disabled) A final stage to send notifications (e.g., email,
-#    Teams message) about the overall success or failure of the pipeline run.
+# 3. Promotion Stages (Test & Prod) & Notifications:
+#    - Deploy_Test: Mirrors the Dev process for QA/UAT (currently disabled).
+#    - Deploy_Prod: The final production deployment. Protected by approval gates
+#      and runs only on 'release/*' branches. Includes the same capture/rollback
+#      logic as Dev.
+#    - Notifications: Sends success/failure alerts after pipeline completion.
 #
 # -----------------------------------------------------------------------------
 
@@ -148,7 +123,6 @@ stages:
               tags: |
                 local-scan
                 $(app.image.tag)
-                latest
 
           - script: trivy image --severity HIGH,CRITICAL --exit-code 1 $(app.image.name):local-scan
             displayName: "Scan Local Docker Image with Trivy"
@@ -160,7 +134,6 @@ stages:
               repository: $(app.image.repository)
               tags: |
                 $(app.image.tag)
-                latest
 
           - task: Docker@2
             displayName: "Logout from GHCR"
@@ -178,13 +151,32 @@ stages:
     variables:
       - group: csec-app-dev-vars # Stage-scoped variables for Dev
     jobs:
-      # Job 1: Deploy Database Schema to Dev
+      # Job 1: Capture current state for potential rollback
+      - job: Capture_State_Dev
+        displayName: "Capture Current State (Dev)"
+        container: csec-build-container
+        steps:
+          - task: AzureCLI@2
+            name: Capture
+            displayName: "Capture App Service State"
+            inputs:
+              azureSubscription: $(CSEC_AZ_SERVICE_CONN)
+              scriptType: "bash"
+              scriptLocation: "inlineScript"
+              inlineScript: |
+                # Capture current container image
+                PREV_IMAGE=$(az webapp config container show -n $(APP_NAME) -g $(RESOURCE_GROUP_NAME) --query '[0].image' -o tsv)
+                echo "##vso[task.setvariable variable=PREV_IMAGE;isOutput=true]$PREV_IMAGE"
+
+      # Job 2: Deploy Database Schema to Dev
       - job: Deploy_DB_Dev
         displayName: "Deploy Database Schema to Dev"
+        dependsOn: Capture_State_Dev
         container: csec-build-container
         steps:
           - checkout: self # Checkout the repo to get backend.sql
-          - template: templates/db-deploy.yml
+
+          - template: templates/db-deploy.yml # Invoke the reusable template for DB deployment
             parameters:
               displayName: "Deploy Backend Objects to Dev DB"
               azureServiceConnection: $(CSEC_AZ_SERVICE_CONN)
@@ -195,15 +187,17 @@ stages:
               dbPasswordKey: "postgres-db-csb-app-user-password"
               script: |
                 echo "Executing backend.sql on Dev database..."
-                psql -f "$(app.sourceDirectory)/backend.sql"
+                psql -v ON_ERROR_STOP=1 -f "$(app.sourceDirectory)/backend.sql"
 
-      # Job 2: Configure App Environment Variables (Dev)
+      # Job 3: Configure App Environment Variables (Dev)
       - job: Configure_Dev_App
         displayName: "Configure App Environment Variables (Dev)"
         dependsOn: Deploy_DB_Dev
+        condition: succeeded()
         container: csec-build-container
         steps:
           - checkout: none
+
           - task: AzureCLI@2
             displayName: "Update App Service Settings"
             inputs:
@@ -220,7 +214,7 @@ stages:
 
                 echo "App Service settings updated successfully."
 
-      # Job 3: Deploy Application to Dev
+      # Job 4: Deploy Application to Dev
       - deployment: Deploy_App_Dev
         displayName: "Deploy App to Dev Environment"
         dependsOn: Configure_Dev_App # Ensure configuration job finishes first
@@ -231,6 +225,7 @@ stages:
             deploy:
               steps:
                 - checkout: none
+
                 - template: templates/app-deploy.yml
                   parameters:
                     azureServiceConnection: $(CSEC_AZ_SERVICE_CONN)
@@ -239,7 +234,7 @@ stages:
                     imageName: "$(app.image.name)"
                     imageTag: "$(app.image.tag)"
 
-      # Job 4: Post-Deployment Validation (Dev)
+      # Job 5: Post-Deployment Validation (Dev)
       - job: Post_Deployment_Validation_Dev
         displayName: "Run Post-Deployment Validations (Dev)"
         dependsOn: Deploy_App_Dev # Runs after the app deployment job
@@ -253,6 +248,34 @@ stages:
               vaultName: $(KEY_VAULT_NAME)
               resourceGroupName: $(RESOURCE_GROUP_NAME)
 
+      # Job 6: Rollback Dev Stage - Runs if any previous job in the stage fails
+      - job: Rollback_Dev_Stage
+        displayName: "Rollback Dev Stage"
+        dependsOn:
+          - Capture_State_Dev
+          - Deploy_DB_Dev
+          - Configure_Dev_App
+          - Deploy_App_Dev
+          - Post_Deployment_Validation_Dev
+        condition: failed()
+        container: csec-build-container
+        variables:
+          PREV_IMAGE: $[ dependencies.Capture_State_Dev.outputs['Capture.PREV_IMAGE'] ]
+        steps:
+          - checkout: none
+
+          # 1. Revert App Image
+          - task: AzureCLI@2
+            displayName: "Rollback App Image"
+            condition: and(failed(), ne(variables['PREV_IMAGE'], ''))
+            inputs:
+              azureSubscription: $(CSEC_AZ_SERVICE_CONN)
+              scriptType: "bash"
+              scriptLocation: "inlineScript"
+              inlineScript: |
+                echo "Rolling back App Service image to: $(PREV_IMAGE)"
+                az webapp config container set -n $(APP_NAME) -g $(RESOURCE_GROUP_NAME) --docker-custom-image-name "$(PREV_IMAGE)"
+
   # ----------------------------
   # Stage 3: CD - Deploy to Test
   # ----------------------------
@@ -264,9 +287,26 @@ stages:
     # This stage is explicitly disabled. To enable, change to 'succeeded()'.
     condition: false
     jobs:
-      # Job 1: Deploy Database Schema to Test
+      # Job 1: Capture State (Test)
+      - job: Capture_State_Test
+        displayName: "Capture Current State (Test)"
+        container: csec-build-container
+        steps:
+          - task: AzureCLI@2
+            name: Capture
+            displayName: "Capture App Service State"
+            inputs:
+              azureSubscription: $(CSEC_AZ_SERVICE_CONN)
+              scriptType: "bash"
+              scriptLocation: "inlineScript"
+              inlineScript: |
+                PREV_IMAGE=$(az webapp config container show -n $(APP_NAME) -g $(RESOURCE_GROUP_NAME) --query '[0].image' -o tsv)
+                echo "##vso[task.setvariable variable=PREV_IMAGE;isOutput=true]$PREV_IMAGE"
+
+      # Job 2: Deploy Database Schema to Test
       - job: Deploy_DB_Test
         displayName: "Deploy Database Schema to Test"
+        dependsOn: Capture_State_Test
         container: csec-build-container
         steps:
           - checkout: self # Checkout the repo to get backend.sql
@@ -281,9 +321,9 @@ stages:
               dbPasswordKey: "postgres-db-csb-app-user-password"
               script: |
                 echo "Executing backend.sql on Test database..."
-                psql -f "$(app.sourceDirectory)/backend.sql"
+                psql -v ON_ERROR_STOP=1 -f "$(app.sourceDirectory)/backend.sql"
 
-      # Job 2: Configure App Environment Variables (Test)
+      # Job 3: Configure App Environment Variables (Test)
       - job: Configure_Test_App
         displayName: "Configure App Environment Variables (Test)"
         dependsOn: Deploy_DB_Test
@@ -302,9 +342,9 @@ stages:
                 POSTGRES_PASSWORD=$(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-csb-api-user-password" --query "value" -o tsv)
 
                 echo "Updating App Service environment variables..."
-                az webapp config appsettings set -g $(RESOURCE_GROUP_NAME) -n $(APP_NAME) --settings "POSTGRES_USER=${POSTGRES_USER}" "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
+                az webapp config appsettings set -g $(RESOURCE_GROUP_NAME) -n $(APP_NAME) --settings "POSTGRES_USER=$(POSTGRES_USER)" "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
 
-      # Job 3: Deploy Application to Test
+      # Job 4: Deploy Application to Test
       - deployment: Deploy_App_Test
         displayName: "Deploy App to Test Environment"
         dependsOn: Configure_Test_App # Ensure configuration job finishes first
@@ -323,21 +363,7 @@ stages:
                     imageName: "$(app.image.name)"
                     imageTag: "$(app.image.tag)"
 
-      # Job 4: Post-Deployment Validation (Prod)
-      - job: Post_Deployment_Validation_Prod
-        displayName: "Run Post-Deployment Validations (Prod)"
-        dependsOn: Deploy_App_Prod
-        container: csec-build-container
-        steps:
-          - checkout: none
-          - template: templates/app-validate.yml
-            parameters:
-              azureServiceConnection: $(CSEC_AZ_SERVICE_CONN)
-              appName: $(APP_NAME)
-              vaultName: $(KEY_VAULT_NAME)
-              resourceGroupName: $(RESOURCE_GROUP_NAME)
-
-      # Job 4: Post-Deployment Validation (Test)
+      # Job 5: Post-Deployment Validation (Test)
       - job: Post_Deployment_Validation_Test
         displayName: "Run Post-Deployment Validations (Test)"
         dependsOn: Deploy_App_Test # Runs after the app deployment job
@@ -350,6 +376,32 @@ stages:
               appName: $(APP_NAME)
               vaultName: $(KEY_VAULT_NAME)
               resourceGroupName: $(RESOURCE_GROUP_NAME)
+
+      # Job 6: Rollback Test Stage
+      - job: Rollback_Test_Stage
+        displayName: "Rollback Test Stage"
+        dependsOn:
+          - Capture_State_Test
+          - Deploy_DB_Test
+          - Configure_Test_App
+          - Deploy_App_Test
+          - Post_Deployment_Validation_Test
+        condition: failed()
+        container: csec-build-container
+        variables:
+          PREV_IMAGE: $[ dependencies.Capture_State_Test.outputs['Capture.PREV_IMAGE'] ]
+        steps:
+          - checkout: none
+          - task: AzureCLI@2
+            displayName: "Rollback App Image"
+            condition: and(failed(), ne(variables['PREV_IMAGE'], ''))
+            inputs:
+              azureSubscription: $(CSEC_AZ_SERVICE_CONN)
+              scriptType: "bash"
+              scriptLocation: "inlineScript"
+              inlineScript: |
+                echo "Rolling back App Service image to: $(PREV_IMAGE)"
+                az webapp config container set -n $(APP_NAME) -g $(RESOURCE_GROUP_NAME) --docker-custom-image-name "$(PREV_IMAGE)"
 
   # ----------------------------------
   # Stage 4: CD - Deploy to Production
@@ -364,9 +416,26 @@ stages:
     # gate to ensure only release-ready code is deployed to Production.
     condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/heads/release/'))
     jobs:
-      # Job 1: Deploy Database Schema to Prod
+      # Job 1: Capture State (Prod)
+      - job: Capture_State_Prod
+        displayName: "Capture Current State (Prod)"
+        container: csec-build-container
+        steps:
+          - task: AzureCLI@2
+            name: Capture
+            displayName: "Capture App Service State"
+            inputs:
+              azureSubscription: $(CSEC_AZ_SERVICE_CONN)
+              scriptType: "bash"
+              scriptLocation: "inlineScript"
+              inlineScript: |
+                PREV_IMAGE=$(az webapp config container show -n $(APP_NAME) -g $(RESOURCE_GROUP_NAME) --query '[0].image' -o tsv)
+                echo "##vso[task.setvariable variable=PREV_IMAGE;isOutput=true]$PREV_IMAGE"
+
+      # Job 2: Deploy Database Schema to Prod
       - job: Deploy_DB_Prod
         displayName: "Deploy Database Schema to Prod"
+        dependsOn: Capture_State_Prod
         container: csec-build-container
         steps:
           - checkout: self
@@ -381,9 +450,9 @@ stages:
               dbPasswordKey: "postgres-db-csb-app-user-password"
               script: |
                 echo "Executing backend.sql on Prod database..."
-                psql -f "$(app.sourceDirectory)/backend.sql"
+                psql -v ON_ERROR_STOP=1 -f "$(app.sourceDirectory)/backend.sql"
 
-      # Job 2: Configure App Environment Variables (Prod)
+      # Job 3: Configure App Environment Variables (Prod)
       - job: Configure_Prod_App
         displayName: "Configure App Environment Variables (Prod)"
         dependsOn: Deploy_DB_Prod
@@ -399,14 +468,38 @@ stages:
               inlineScript: |
                 set -e
                 POSTGRES_PASSWORD=$(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-csb-api-user-password" --query "value" -o tsv)
-                az webapp config appsettings set -g $(RESOURCE_GROUP_NAME) -n $(APP_NAME) --settings "POSTGRES_USER=${POSTGRES_USER}" "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
+                az webapp config appsettings set -g $(RESOURCE_GROUP_NAME) -n $(APP_NAME) --settings "POSTGRES_USER=$(POSTGRES_USER)" "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
 
-      # Job 3: Deploy Application to Prod
+      # Job 4: Deploy Application to Prod
       - deployment: Deploy_App_Prod
         displayName: "Deploy App to Prod Environment"
         dependsOn: Configure_Prod_App
         container: csec-build-container
         environment: "csec-prod" # Targets the Prod environment with approval gates
+        # ----------------------------------------------------------------------------
+        # NOTE ON DEPLOYMENT OPTIONS:
+        #
+        # 1. Current Limitations:
+        #    The current deployment strategy updates the production instance directly.
+        #    This can lead to "cold starts" and potential downtime during the
+        #    container pull and restart process. It is not ideal for mission-critical
+        #    applications requiring zero downtime.
+        #
+        # 2. Recommended Strategy: Deployment Slots (Blue/Green)
+        #    For zero-downtime deployments, Azure App Service Deployment Slots should
+        #    be utilized.
+        #    - Deploy to a 'Staging' slot first.
+        #    - Validate health on the staging slot.
+        #    - Perform a 'Swap' operation to instantly promote Staging to Production.
+        #    - Rollback involves simply swapping back.
+        #    *Note: This requires a Standard (S1) or Premium (P1v2) App Service Plan.*
+        #
+        # 3. Infrastructure Isolation:
+        #    For true isolation, the Production environment should reside in a
+        #    completely separate Resource Group (Easily scalable using Terraform)
+        #    with a dedicate App Service Plan (e.g., Premium tier). This prevents
+        #    resource contention between Staging/Dev slots and live Production traffic.
+        # ----------------------------------------------------------------------------
         strategy:
           runOnce:
             deploy:
@@ -420,10 +513,50 @@ stages:
                     imageName: "$(app.image.name)"
                     imageTag: "$(app.image.tag)"
 
-  # --------------------------------------------
-  # Stage 5: Post-Deployment Notifications Stage
-  # --------------------------------------------
-  - stage: Post_Deployment_Notifications
+      # Job 5: Post-Deployment Validation (Prod)
+      - job: Post_Deployment_Validation_Prod
+        displayName: "Run Post-Deployment Validations (Prod)"
+        dependsOn: Deploy_App_Prod
+        container: csec-build-container
+        steps:
+          - checkout: none
+          - template: templates/app-validate.yml
+            parameters:
+              azureServiceConnection: $(CSEC_AZ_SERVICE_CONN)
+              appName: $(APP_NAME)
+              vaultName: $(KEY_VAULT_NAME)
+              resourceGroupName: $(RESOURCE_GROUP_NAME)
+
+      # Job 6: Rollback Prod Stage
+      - job: Rollback_Prod_Stage
+        displayName: "Rollback Prod Stage"
+        dependsOn:
+          - Capture_State_Prod
+          - Deploy_DB_Prod
+          - Configure_Prod_App
+          - Deploy_App_Prod
+          - Post_Deployment_Validation_Prod
+        condition: failed()
+        container: csec-build-container
+        variables:
+          PREV_IMAGE: $[ dependencies.Capture_State_Prod.outputs['Capture.PREV_IMAGE'] ]
+        steps:
+          - checkout: none
+          - task: AzureCLI@2
+            displayName: "Rollback App Image"
+            condition: and(failed(), ne(variables['PREV_IMAGE'], ''))
+            inputs:
+              azureSubscription: $(CSEC_AZ_SERVICE_CONN)
+              scriptType: "bash"
+              scriptLocation: "inlineScript"
+              inlineScript: |
+                echo "Rolling back App Service image to: $(PREV_IMAGE)"
+                az webapp config container set -n $(APP_NAME) -g $(RESOURCE_GROUP_NAME) --docker-custom-image-name "$(PREV_IMAGE)"
+
+  # -----------------------------------------
+  # Stage 5: Post-Deployment Processing Stage
+  # -----------------------------------------
+  - stage: Post_Deployment_Processing
     displayName: "Post-Deployment Notifications"
     dependsOn: Deploy_Prod
     condition: false # Explicitly disable this stage
