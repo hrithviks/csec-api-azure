@@ -29,6 +29,9 @@
  * 
  */ ---------------------------------------------------------------------------
 
+-- Start transaction to ensure atomic initialization
+BEGIN;
+
 -- Set timezone to UTC for consistency across the application
 set timezone = 'utc';
 
@@ -86,6 +89,8 @@ alter role csb_app set search_path = csb_app, public;
 alter role csb_api_user set search_path = csb_app, public;
 alter role csb_aws_user set search_path = csb_app, public;
 alter role csb_azure_user set search_path = csb_app, public;
+
+COMMIT;
 
 -- Log a message to the console upon successful completion
 \echo 'CSecBridge database initialization script completed successfully.'
