@@ -12,6 +12,17 @@
 # This pipeline is configured for manual execution. For continuous deployment,
 # a branch trigger with path filters for 'csb-api-iac/terraform/' can be
 # implemented.
+#
+# Reliability & Rollback Strategy:
+# - Infrastructure (Terraform):
+#   Adopts a "Fix Forward" or "Git Revert" strategy. Infrastructure state is
+#   persistent and complex. Automatic rollbacks (e.g.,
+#   running 'terraform destroy' or applying a previous state automatically) are
+#   risky and can lead to data loss.
+#   - Action on Failure: Analyze the Terraform logs, fix the configuration (IaC),
+#     and re-run the pipeline. Alternatively, revert the git commit to the
+#     last known good state and run the pipeline to align infrastructure.
+#
 # -----------------------------------------------------------------------------
 
 trigger: none
@@ -46,12 +57,12 @@ variables:
     value: "csec-az-devops-main"
 
 stages:
-  # -------------------------------------------------------------------------- #
-  # Validation Stage:                                                          #
-  # Performs static code analysis to ensure code quality and security before   #
-  # any deployment attempts. This stage runs first and fails the pipeline if   #
-  # any issues are found.                                                      #
-  # -------------------------------------------------------------------------- #
+  # --------------------------------------------------------------------------
+  # Validation Stage:
+  # Performs static code analysis to ensure code quality and security before
+  # any deployment attempts. This stage runs first and fails the pipeline if
+  # any issues are found.
+  # --------------------------------------------------------------------------
   - stage: Validate
     displayName: "Validate Terraform Code"
     jobs:
@@ -117,11 +128,11 @@ stages:
             displayName: "Scan for Security Issues (tfsec)"
             workingDirectory: $(config.terraformWorkingDirectory)
 
-  # ---------------------------------------------------------------------- #
-  # Development Deployment Stage:                                          #
-  # Deploys the infrastructure to the Development environment. This is the #
-  # first deployment target, used for initial validation and testing.      #
-  # ---------------------------------------------------------------------- #
+  # ----------------------------------------------------------------------
+  # Development Deployment Stage:
+  # Deploys the infrastructure to the Development environment. This is the
+  # first deployment target, used for initial validation and testing.
+  # ----------------------------------------------------------------------
   - stage: Deploy_Dev
     displayName: "Deploy to Dev"
     # This stage will only run if the 'Validate' stage completes successfully.
@@ -137,6 +148,14 @@ stages:
         environment: "csec-dev"
         strategy:
           # The runOnce strategy executes the deployment steps a single time.
+          # ------------------------------------------------------------------
+          # ROLLBACK STRATEGY:
+          # Terraform does not support atomic rollbacks. If this job fails:
+          # 1. Do NOT attempt to automatically undo changes.
+          # 2. Review the Terraform logs to understand the partial state.
+          # 3. Fix the .tf files or revert the git commit.
+          # 4. Re-run the pipeline to converge to the desired state.
+          # ------------------------------------------------------------------
           runOnce:
             deploy:
               steps:
@@ -156,13 +175,13 @@ stages:
                     azureServiceConnection: $(config.azureServiceConnection)
                     terraformWorkingDirectory: $(config.terraformWorkingDirectory)
 
-  # -------------------------------------------------------------------------- #
-  # Development Configuration Stage:                                           #
-  # This stage runs after the Dev infrastructure is deployed. It consists of   #
-  # two jobs: the first initializes the database schema by running init.sql,   #
-  # and the second sets the passwords for the application-specific users by    #
-  # reading the credentials securely from Azure Key Vault.                     #
-  # -------------------------------------------------------------------------- #
+  # --------------------------------------------------------------------------
+  # Development Configuration Stage:
+  # This stage runs after the Dev infrastructure is deployed. It consists of
+  # two jobs: the first initializes the database schema by running init.sql,
+  # and the second sets the passwords for the application-specific users by
+  # reading the credentials securely from Azure Key Vault.
+  # --------------------------------------------------------------------------
   - stage: Configure_Dev
     displayName: "Configure Dev Environment"
     dependsOn: Deploy_Dev
@@ -188,7 +207,7 @@ stages:
               script: | # This script is injected into the template
                 echo "Executing init.sql script..."
                 DB_NAME=$(az keyvault secret show --vault-name "$(KEY_VAULT_NAME)" --name "postgres-db-name" --query "value" -o tsv)
-                psql -v db_name="\"$DB_NAME\"" -f $(config.infraWorkingDirectory)/postgres/init.sql
+                psql -v ON_ERROR_STOP=1 -v db_name="\"$DB_NAME\"" -f $(config.infraWorkingDirectory)/postgres/init.sql
                 echo "Database initialization complete."
 
       # Job 2: Set the passwords for the application-specific database users.
@@ -219,7 +238,7 @@ stages:
 
                 # The -v flags pass the passwords as psql variables (:var), which avoids shell
                 # interpolation and keeps the passwords from being exposed in logs.
-                psql \
+                psql -v ON_ERROR_STOP=1 \
                   -v app_pswd="'${DB_APP_USER_PSWD}'" \
                   -v api_pswd="'${DB_API_USER_PSWD}'" \
                   -v aws_pswd="'${DB_AWS_USER_PSWD}'" \
@@ -232,11 +251,11 @@ stages:
 
                 echo "Database user passwords updated."
 
-  # -------------------------------------------------------------------------- #
-  # Test Deployment Stage:                                                     #
-  # Deploys the infrastructure to the Test environment for QA and integration  #
-  # testing.                                                                   #
-  # -------------------------------------------------------------------------- #
+  # --------------------------------------------------------------------------
+  # Test Deployment Stage:
+  # Deploys the infrastructure to the Test environment for QA and integration
+  # testing.
+  # --------------------------------------------------------------------------
   - stage: Deploy_Test
     displayName: "Deploy to Test"
     # This stage will only run after the 'Deploy_Dev' stage completes.
@@ -255,6 +274,14 @@ stages:
         environment: "csec-test"
         strategy:
           # The runOnce strategy executes the deployment steps a single time.
+          # ------------------------------------------------------------------
+          # ROLLBACK STRATEGY:
+          # Terraform does not support atomic rollbacks. If this job fails:
+          # 1. Do NOT attempt to automatically undo changes.
+          # 2. Review the Terraform logs to understand the partial state.
+          # 3. Fix the .tf files or revert the git commit.
+          # 4. Re-run the pipeline to converge to the desired state.
+          # ------------------------------------------------------------------
           runOnce:
             deploy:
               steps:
@@ -273,11 +300,11 @@ stages:
                     azureServiceConnection: $(config.azureServiceConnection)
                     terraformWorkingDirectory: $(config.terraformWorkingDirectory)
 
-  # -------------------------------------------------------------------------- #
-  # Production Deployment Stage:                                               #
-  # Deploys the infrastructure to the Production environment. This is the      #
-  # final and most critical stage.                                             #
-  # -------------------------------------------------------------------------- #
+  # --------------------------------------------------------------------------
+  # Production Deployment Stage:
+  # Deploys the infrastructure to the Production environment. This is the
+  # final and most critical stage.
+  # --------------------------------------------------------------------------
   - stage: Deploy_Prod
     displayName: "Deploy to Prod"
     # This stage will only run after the 'Deploy_Test' stage completes.
@@ -298,6 +325,14 @@ stages:
         environment: "csec-prod"
         strategy:
           # The runOnce strategy executes the deployment steps a single time.
+          # ------------------------------------------------------------------
+          # ROLLBACK STRATEGY:
+          # Terraform does not support atomic rollbacks. If this job fails:
+          # 1. Do NOT attempt to automatically undo changes.
+          # 2. Review the Terraform logs to understand the partial state.
+          # 3. Fix the .tf files or revert the git commit.
+          # 4. Re-run the pipeline to converge to the desired state.
+          # ------------------------------------------------------------------
           runOnce:
             deploy:
               steps:
@@ -316,11 +351,11 @@ stages:
                     azureServiceConnection: $(config.azureServiceConnection)
                     terraformWorkingDirectory: $(config.terraformWorkingDirectory)
 
-  # -------------------------------------------------------------------------- #
-  # Post-Deployment Notifications Stage:                                       #
-  # This final stage runs after all other stages have completed. It is         #
-  # responsible for sending notifications about the pipeline's final status.   #
-  # -------------------------------------------------------------------------- #
+  # --------------------------------------------------------------------------
+  # Post-Deployment Notifications Stage:
+  # This final stage runs after all other stages have completed. It is
+  # responsible for sending notifications about the pipeline's final status.
+  # --------------------------------------------------------------------------
   - stage: Post_Deployment_Notifications
     displayName: "Post-Deployment Notifications"
     # This stage depends on the final deployment stage in the chain.
